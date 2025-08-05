@@ -1,0 +1,16 @@
+[project]
+name = "download-js-map-files"
+version = "1.0.0"
+description = "Download JS map files"
+authors = [{name = "Danny van der Knaap"}]
+dependencies = [
+    "requests",
+    "beautifulsoup4"
+]
+
+[project.scripts]
+download_js_map_files = "download_js_map_files.download_js_map_files:main"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
