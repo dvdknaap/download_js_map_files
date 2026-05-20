@@ -1,0 +1,21 @@
+[MASTER]
+ignore=tests,.venv
+
+[FORMAT]
+max-line-length=120
+
+[MESSAGES CONTROL]
+disable=
+    duplicate-code,
+    import-outside-toplevel,
+    missing-class-docstring,
+    missing-function-docstring,
+    missing-module-docstring,
+    protected-access,
+    too-few-public-methods,
+    too-many-arguments,
+    too-many-instance-attributes,
+    too-many-lines,
+    too-many-locals,
+    too-many-branches,
+    too-many-positional-arguments,

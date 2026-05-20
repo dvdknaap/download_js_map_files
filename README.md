@@ -1,79 +1,97 @@
 # JavaScript Source Map Downloader & Recon Tool
 
-A CLI tool designed for security reconnaissance that detects, downloads, and analyzes JavaScript files from a target website.
-
-The tool prioritizes extracting original source code via Source Maps (`.js.map`). If no source map is found, it falls back to downloading the minified code and beautifying it. Additionally, it performs static analysis on both inline and external scripts to identify potential secrets (API keys, tokens, etc.).
+A pipx-friendly CLI for security reconnaissance against JavaScript-heavy web applications. It discovers inline and external scripts, downloads source maps when available, extracts original sources, falls back to beautified compiled JavaScript, and writes endpoint and secret findings to disk.
 
 ## Features
 
-* **Source Map Extraction:** Automatically detects and downloads `.js.map` files to reconstruct the original source tree.
-* **Inline & External Analysis:** Processes both external JS files and inline `<script>` blocks found in the HTML.
-* **Fallback Beautification:** Uses `jsbeautifier` to unminify code when source maps are unavailable.
-* **Secret Scanning:** Scans all processed code for sensitive patterns, including AWS keys, Google API keys, and private tokens.
-* **Proxy Support:** Integrated support for routing traffic through proxies (e.g., Burp Suite) with automatic SSL verification handling.
-* **Path Traversal Protection:** Prevents malicious source maps from writing files outside the target directory.
+* Source-map discovery through `SourceMap`/`X-SourceMap` headers and `sourceMappingURL` comments.
+* Safe source-map extraction that prevents path traversal outside the output directory.
+* Inline and external JavaScript processing.
+* Beautified fallback output for compiled or minified scripts without usable source maps.
+* Static scanning for common secret patterns, API paths, AJAX/fetch calls, full URLs, and RPC-like method definitions.
+* Raw HTTP request parsing with preserved method, headers, host, and body.
+* Optional proxy support for Burp Suite, Caido, or similar tools.
 
 ## Installation
 
-### Prerequisites
-* Python 3.8+
-* pip / pipx
+Requires Python 3.10+.
 
-### Installation via pipx
 ```bash
 pipx install git+https://github.com/dvdknaap/download_js_map_files.git
+```
 
+For local development:
+
+```bash
+make init
 ```
 
 ## Usage
 
-### Basic Scan
-
-Scan a target URL and save the output to the default directory (`./js_recon_out`).
+Scan a URL directly:
 
 ```bash
-download_js_map_files -u https://example.com
-
+download_js_map_files -u https://example.com -o ./js_recon_out --no-proxy
 ```
 
-### Custom Output Directory
-
-Specify a custom folder for the results.
+Scan from a raw HTTP request file:
 
 ```bash
-download_js_map_files -u https://example.com -o ./target_output
-
+download_js_map_files -r request.txt --scheme https -o ./js_recon_out
 ```
 
-### Proxy Integration
-
-Route traffic through a proxy (default: `http://127.0.0.1:8080`). 
-This automatically disables SSL verification to allow traffic inspection via tools like Burp Suite or Caido.
+Route traffic through the default local proxy:
 
 ```bash
-# Default proxy (127.0.0.1:8080)
 download_js_map_files -u https://example.com -p
-
-# Custom upstream proxy
-download_js_map_files -u https://example.com -p http://10.10.10.50:8888
 ```
+
+Use a custom proxy:
+
+```bash
+download_js_map_files -u https://example.com --proxy http://127.0.0.1:8081
+```
+
+Disable proxying even when a proxy flag is supplied:
+
+```bash
+download_js_map_files -u https://example.com --proxy http://127.0.0.1:8081 --no-proxy
+```
+
+## Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `-u`, `--url` | Target URL to scan. Mutually exclusive with `--request`. |
+| `-r`, `--request` | Raw HTTP request file to parse. Mutually exclusive with `--url`. |
+| `-o`, `--output` | Output directory. Defaults to `./js_recon_out`. |
+| `-p`, `--proxy` | Proxy URL. Defaults to `http://127.0.0.1:8080` when passed without a value. |
+| `--no-proxy` | Disable proxying. |
+| `--scheme` | Scheme used when parsing raw request files. Defaults to `https`. |
+| `--version` | Print the installed CLI version. |
 
 ## Output Structure
 
-The tool generates the following directory structure upon completion:
+The selected output directory can contain:
 
-* `compiled/`: Contains beautified versions of minified JavaScript files (used as a fallback).
-* `source_maps/`: Contains the original source code reconstructed from `.js.map` files, maintaining the original directory structure.
-* `inline_scripts/`: Contains extracted inline JavaScript blocks from the HTML.
-* `urls.txt`: A list of all unique JavaScript URLs discovered on the target.
-* `findings.txt`: A report containing potential secrets found during static analysis, including file names and line numbers.
+* `inline_scripts/`: extracted inline JavaScript blocks.
+* `compiled/`: beautified compiled JavaScript when source extraction is unavailable.
+* `source_maps/`: original sources reconstructed from source maps.
+* `source_maps/_metadata/`: source-map `sources` and `names` intelligence.
+* `urls.txt`: in-scope JavaScript URLs discovered on the page.
+* `findings.txt`: potential secrets and suspicious source-map variable names.
+* `discovered_endpoints.txt`: detailed endpoint and RPC-like context.
+* `all_endpoints_unique.txt`: unique URL/API path wordlist.
+* `clean_rpc_endpoints.txt`: extracted RPC/method-name wordlist.
 
-## Configuration
+## Development
 
-### Arguments
+```bash
+make format
+make lint
+make test
+make test-e2e
+make all
+```
 
-| Argument | Flag             | Description                       | Default                                     |
-|----------|------------------|-----------------------------------|---------------------------------------------|
-| URL      | `-u`, `--url`    | The target URL to scan.           | Required                                    |
-| Output   | `-o`, `--output` | The directory to save results.    | `./js_recon_out`                            |
-| Proxy    | `-p`, `--proxy`  | Proxy URL for traffic inspection. | `None` (or `127.0.0.1:8080` if flag is set) |
+`make test` enforces at least 95 percent unit-test coverage for the `download_js_map_files` package. `make test-e2e` installs the local project through pipx in an isolated temporary environment and exercises the console script.

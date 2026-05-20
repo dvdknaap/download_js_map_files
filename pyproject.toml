@@ -1,7 +1,9 @@
 [project]
 name = "download-js-map-files"
 version = "3.0.0"
-description = "Download JS map files"
+description = "Download and analyze JavaScript source maps"
+readme = "README.md"
+requires-python = ">=3.10"
 authors = [{name = "Danny van der Knaap"}]
 dependencies = [
     "requests",
@@ -9,9 +11,37 @@ dependencies = [
     "jsbeautifier"
 ]
 
+[project.optional-dependencies]
+dev = [
+    "black",
+    "isort",
+    "mypy",
+    "pipx",
+    "pre-commit",
+    "pylint",
+    "pytest",
+    "pytest-cov"
+]
+
 [project.scripts]
-download_js_map_files = "download_js_map_files.download_js_map_files:main"
+download_js_map_files = "download_js_map_files.cli:main"
 
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 120
+target-version = ["py310"]
+
+[tool.isort]
+profile = "black"
+line_length = 120
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+ignore_missing_imports = true
