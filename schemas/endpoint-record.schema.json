@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/dvdknaap/download_js_map_files/schemas/endpoint-record.schema.json",
+  "title": "download_js_map_files endpoints.jsonl record",
+  "type": "object",
+  "required": ["source", "type", "value", "normalized_value"],
+  "properties": {
+    "source": {"type": "string"},
+    "type": {
+      "type": "string",
+      "enum": ["api_path", "ajax_call", "full_url"]
+    },
+    "value": {"type": "string"},
+    "normalized_value": {"type": "string"}
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/dvdknaap/download_js_map_files/schemas/summary.schema.json",
+  "title": "download_js_map_files summary.json",
+  "type": "object",
+  "required": [
+    "target",
+    "status",
+    "proxy_enabled",
+    "include_third_party",
+    "scope_hosts",
+    "exclude_hosts",
+    "scope_report",
+    "limits",
+    "scripts",
+    "files_written",
+    "secret_findings",
+    "endpoint_export",
+    "counts"
+  ],
+  "properties": {
+    "target": {
+      "type": "object",
+      "required": ["url", "method", "base_domain"],
+      "properties": {
+        "url": {"type": "string", "format": "uri"},
+        "method": {"type": "string"},
+        "base_domain": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "status": {
+      "type": "string",
+      "enum": ["sourcemaps_found", "beautified_only", "no_scripts_found", "target_fetch_failed"]
+    },
+    "proxy_enabled": {"type": "boolean"},
+    "include_third_party": {"type": "boolean"},
+    "scope_hosts": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "exclude_hosts": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "scope_report": {
+      "type": ["string", "null"]
+    },
+    "limits": {
+      "type": "object",
+      "required": ["timeout_seconds", "retries", "delay_seconds", "max_file_size_bytes"],
+      "properties": {
+        "timeout_seconds": {"type": "number"},
+        "retries": {"type": "integer", "minimum": 0},
+        "delay_seconds": {"type": "number", "minimum": 0},
+        "max_file_size_bytes": {"type": "integer"}
+      },
+      "additionalProperties": false
+    },
+    "scripts": {
+      "type": "object",
+      "required": ["discovered", "selected", "skipped_third_party", "processed"],
+      "properties": {
+        "discovered": {
+          "type": "array",
+          "items": {"type": "string", "format": "uri"}
+        },
+        "selected": {
+          "type": "array",
+          "items": {"type": "string", "format": "uri"}
+        },
+        "skipped_third_party": {
+          "type": "array",
+          "items": {"type": "string", "format": "uri"}
+        },
+        "processed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind", "status"],
+            "properties": {
+              "kind": {"type": "string", "enum": ["inline", "external"]},
+              "status": {
+                "type": "string",
+                "enum": [
+                  "processed",
+                  "pending",
+                  "http_error",
+                  "skipped_oversize",
+                  "request_error",
+                  "sourcemap_extracted",
+                  "beautified_fallback"
+                ]
+              },
+              "label": {"type": "string"},
+              "url": {"type": "string", "format": "uri"},
+              "source_map_url": {
+                "type": ["string", "null"],
+                "format": "uri"
+              },
+              "source_map_candidates": {
+                "type": "array",
+                "items": {"type": "string", "format": "uri"}
+              },
+              "status_code": {"type": "integer"},
+              "error": {"type": "string"}
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "files_written": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "secret_findings": {
+      "type": "array",
+      "items": {"$ref": "secret-finding-record.schema.json"}
+    },
+    "endpoint_export": {
+      "type": ["string", "null"]
+    },
+    "counts": {
+      "type": "object",
+      "required": [
+        "scripts_discovered",
+        "scripts_selected",
+        "scripts_processed",
+        "inline_scripts_processed",
+        "source_maps_found",
+        "beautified_files",
+        "secret_findings",
+        "unique_endpoints",
+        "normalized_endpoints",
+        "clean_rpc_names",
+        "skipped_third_party"
+      ],
+      "properties": {
+        "scripts_discovered": {"type": "integer", "minimum": 0},
+        "scripts_selected": {"type": "integer", "minimum": 0},
+        "scripts_processed": {"type": "integer", "minimum": 0},
+        "inline_scripts_processed": {"type": "integer", "minimum": 0},
+        "source_maps_found": {"type": "integer", "minimum": 0},
+        "beautified_files": {"type": "integer", "minimum": 0},
+        "secret_findings": {"type": "integer", "minimum": 0},
+        "unique_endpoints": {"type": "integer", "minimum": 0},
+        "normalized_endpoints": {"type": "integer", "minimum": 0},
+        "clean_rpc_names": {"type": "integer", "minimum": 0},
+        "skipped_third_party": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
