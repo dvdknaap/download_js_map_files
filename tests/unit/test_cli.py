@@ -44,6 +44,10 @@ def test_build_config_includes_scope_and_network_limits() -> None:
         "-o",
         "out",
         "--include-third-party",
+        "--scope-host",
+        "https://api.example.test:8443/path",
+        "--exclude-host",
+        "analytics.example.test",
         "--timeout",
         "7.5",
         "--retries",
@@ -57,6 +61,8 @@ def test_build_config_includes_scope_and_network_limits() -> None:
     config = build_config(args)
 
     assert config.include_third_party is True
+    assert config.scope_hosts == frozenset({"api.example.test"})
+    assert config.exclude_hosts == frozenset({"analytics.example.test"})
     assert config.timeout == 7.5
     assert config.retries == 1
     assert config.delay == 0.25
@@ -76,6 +82,28 @@ def test_main_without_arguments_prints_help(capsys: pytest.CaptureFixture[str]) 
     assert "network limits" in output
     assert "--scheme {http,https}" in output
     assert "(default: 20.0)" in output
+
+
+def test_build_config_reads_scope_and_exclude_host_files(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    scope_file = tmp_path / "scope.txt"
+    exclude_file = tmp_path / "exclude.txt"
+    scope_file.write_text("cdn.example.test\n", encoding="utf-8")
+    exclude_file.write_text("tracker.example.test\n", encoding="utf-8")
+    args = parse_args(
+        "-u",
+        "https://example.test",
+        "-o",
+        "out",
+        "--scope-host-file",
+        str(scope_file),
+        "--exclude-host-file",
+        str(exclude_file),
+    )
+
+    config = build_config(args)
+
+    assert config.scope_hosts == frozenset({"cdn.example.test"})
+    assert config.exclude_hosts == frozenset({"tracker.example.test"})
 
 
 def test_version_argument_exits(capsys: pytest.CaptureFixture[str]) -> None:

@@ -28,6 +28,8 @@ class ScannerConfig:
     delay: float = 0.0
     max_file_size: int = 10_485_760
     include_third_party: bool = False
+    scope_hosts: frozenset[str] = field(default_factory=frozenset)
+    exclude_hosts: frozenset[str] = field(default_factory=frozenset)
 
 
 @dataclass(frozen=True)

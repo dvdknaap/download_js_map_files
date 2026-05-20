@@ -11,6 +11,7 @@ from .colors import Colors
 from .models import ScannerConfig, ScanTarget
 from .recon import JavaScriptRecon
 from .request_parser import RequestParser
+from .scope import resolve_hosts
 
 DEFAULT_PROXY = "http://127.0.0.1:8080"
 PACKAGE_NAME = "download-js-map-files"
@@ -58,6 +59,30 @@ def create_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Process third-party script URLs instead of only recording them as skipped.",
     )
+    proxy_arguments.add_argument(
+        "--scope-host",
+        action="append",
+        metavar="HOST",
+        help="Additional in-scope host or domain. Can be used multiple times.",
+    )
+    proxy_arguments.add_argument(
+        "--scope-host-file",
+        action="append",
+        metavar="PATH",
+        help="File with additional in-scope hosts, one per line. Can be used multiple times.",
+    )
+    proxy_arguments.add_argument(
+        "--exclude-host",
+        action="append",
+        metavar="HOST",
+        help="Host or domain to skip even if otherwise in scope. Can be used multiple times.",
+    )
+    proxy_arguments.add_argument(
+        "--exclude-host-file",
+        action="append",
+        metavar="PATH",
+        help="File with hosts to skip, one per line. Can be used multiple times.",
+    )
 
     raw_request_arguments = parser.add_argument_group("raw request")
     raw_request_arguments.add_argument(
@@ -94,6 +119,8 @@ def build_config(args: argparse.Namespace) -> ScannerConfig:
     """Build scanner configuration from parsed CLI arguments."""
 
     proxy = None if args.no_proxy else args.proxy
+    scope_hosts = resolve_hosts(args.scope_host, args.scope_host_file)
+    exclude_hosts = resolve_hosts(args.exclude_host, args.exclude_host_file)
     return ScannerConfig(
         output_dir=Path(args.output),
         proxy=proxy,
@@ -102,6 +129,8 @@ def build_config(args: argparse.Namespace) -> ScannerConfig:
         delay=args.delay,
         max_file_size=args.max_file_size,
         include_third_party=args.include_third_party,
+        scope_hosts=scope_hosts,
+        exclude_hosts=exclude_hosts,
     )
 
 

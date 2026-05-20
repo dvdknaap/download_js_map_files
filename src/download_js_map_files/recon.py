@@ -20,6 +20,7 @@ from .http import create_session
 from .io import append_text, ensure_directory, unique_filename, write_text
 from .models import ScannerConfig, ScanResult, ScanTarget
 from .reports import ReportWriter
+from .scope import host_matches, normalize_host
 from .sourcemaps import detect_sourcemap_url, safe_source_path
 
 
@@ -87,6 +88,12 @@ class JavaScriptRecon:
     def _print_startup(self) -> None:
         print(f"{Colors.HEADER}[*] Starting analysis on: {self.target.url}{Colors.RESET}")
         print(f"{Colors.BLUE}[i] Scope: {self.base_domain}{Colors.RESET}")
+        if self.config.scope_hosts:
+            print(
+                f"{Colors.BLUE}[i] Additional scope hosts: {', '.join(sorted(self.config.scope_hosts))}{Colors.RESET}"
+            )
+        if self.config.exclude_hosts:
+            print(f"{Colors.YELLOW}[i] Excluded hosts: {', '.join(sorted(self.config.exclude_hosts))}{Colors.RESET}")
         if self.config.proxy:
             print(f"{Colors.BLUE}[i] Proxy Active: {self.config.proxy}{Colors.RESET}")
         else:
@@ -99,13 +106,16 @@ class JavaScriptRecon:
     @staticmethod
     def _extract_base_domain(url: str) -> str:
         parsed = urlparse(url)
-        netloc = parsed.netloc.lower().split(":")[0]
-        return netloc[4:] if netloc.startswith("www.") else netloc
+        return normalize_host(parsed.hostname or parsed.netloc)
 
     def _is_in_scope(self, url: str) -> bool:
         parsed = urlparse(url)
-        domain = parsed.netloc.lower().split(":")[0]
-        return domain == self.base_domain or domain.endswith(f".{self.base_domain}")
+        domain = normalize_host(parsed.hostname or parsed.netloc)
+        if any(host_matches(domain, excluded_host) for excluded_host in self.config.exclude_hosts):
+            return False
+        if host_matches(domain, self.base_domain):
+            return True
+        return any(host_matches(domain, scope_host) for scope_host in self.config.scope_hosts)
 
     def _fetch_initial_html(self) -> str | None:
         try:
@@ -141,7 +151,9 @@ class JavaScriptRecon:
         skipped: set[str] = set()
 
         for script_url in urls:
-            if self.config.include_third_party or self._is_in_scope(script_url):
+            if self._is_excluded_url(script_url):
+                skipped.add(script_url)
+            elif self.config.include_third_party or self._is_in_scope(script_url):
                 selected.add(script_url)
             else:
                 skipped.add(script_url)
@@ -358,7 +370,14 @@ class JavaScriptRecon:
         self.reporter.append_endpoint_export(label, findings)
 
     def _can_process_url(self, url: str) -> bool:
+        if self._is_excluded_url(url):
+            return False
         return self.config.include_third_party or self._is_in_scope(url)
+
+    def _is_excluded_url(self, url: str) -> bool:
+        parsed = urlparse(url)
+        domain = normalize_host(parsed.hostname or parsed.netloc)
+        return any(host_matches(domain, excluded_host) for excluded_host in self.config.exclude_hosts)
 
     def _delay_if_needed(self) -> None:
         if self.config.delay > 0:
@@ -399,6 +418,8 @@ class JavaScriptRecon:
             "status": status,
             "proxy_enabled": self.config.proxy is not None,
             "include_third_party": self.config.include_third_party,
+            "scope_hosts": sorted(self.config.scope_hosts),
+            "exclude_hosts": sorted(self.config.exclude_hosts),
             "limits": {
                 "timeout_seconds": self.config.timeout,
                 "retries": self.config.retries,

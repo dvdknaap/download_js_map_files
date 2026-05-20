@@ -11,6 +11,7 @@ A pipx-friendly CLI for security reconnaissance against JavaScript-heavy web app
 * Static scanning for common secret patterns, API paths, AJAX/fetch calls, full URLs, and RPC-like method definitions.
 * Raw HTTP request parsing with preserved method, headers, host, and body.
 * Optional proxy support for Burp Suite, Caido, or similar tools.
+* Host allowlists and denylists with repeatable CLI flags or newline-based host files.
 
 ## Installation
 
@@ -71,6 +72,16 @@ Process third-party scripts as well as same-site scripts:
 download_js_map_files -u https://example.com -o ./scan-output/example --include-third-party
 ```
 
+Process only selected additional hosts and skip known unwanted hosts:
+
+```bash
+download_js_map_files -u https://example.com -o ./scan-output/example \
+  --scope-host cdn.example.com \
+  --scope-host-file ./scope-hosts.txt \
+  --exclude-host analytics.example.com \
+  --exclude-host-file ./exclude-hosts.txt
+```
+
 Tune network bounds:
 
 ```bash
@@ -101,6 +112,12 @@ The help output is grouped by workflow area and shows default values.
 | `-p`, `--proxy [URL]` | `None` | Enable proxying. Uses `http://127.0.0.1:8080` when passed without a URL. |
 | `--no-proxy` | `False` | Disable proxying even when `--proxy` is supplied. |
 | `--include-third-party` | `False` | Process third-party script URLs instead of only recording them as skipped. |
+| `--scope-host HOST` | `None` | Additional in-scope host or domain. Can be used multiple times. |
+| `--scope-host-file PATH` | `None` | File with additional in-scope hosts, one per line. Can be used multiple times. |
+| `--exclude-host HOST` | `None` | Host or domain to skip even if otherwise in scope. Can be used multiple times. |
+| `--exclude-host-file PATH` | `None` | File with hosts to skip, one per line. Can be used multiple times. |
+
+Host files are newline-based. Blank lines and comments beginning with `#` are ignored. Host values can be plain hosts, host:port values, or URLs; they are normalized before matching.
 
 ### Raw Request
 
@@ -142,7 +159,7 @@ The selected output directory can contain:
 
 ## Status Semantics
 
-The CLI exits `0` when a scan completes successfully, including scans where no source maps are found. Fatal target or output errors return a non-zero exit code. `summary.json` and the final console status use values such as `sourcemaps_found`, `beautified_only`, `no_scripts_found`, and `target_fetch_failed`.
+The CLI exits `0` when a scan completes successfully, including scans where no source maps are found. Fatal target or output errors return a non-zero exit code. `summary.json` and the final console status use values such as `sourcemaps_found`, `beautified_only`, `no_scripts_found`, and `target_fetch_failed`. `summary.json` also records configured `scope_hosts` and `exclude_hosts`.
 
 ## Raw Request Preservation
 

@@ -221,6 +221,32 @@ def test_recon_include_third_party_and_size_limit_branches(tmp_path) -> None:  #
     assert recon._response_exceeds_limit(FakeResponse(text="1", headers={"Content-Length": "6"})) is True
 
 
+def test_recon_scope_allowlist_and_denylist_filtering(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    recon = JavaScriptRecon(
+        ScanTarget(url="https://example.test/index.html"),
+        ScannerConfig(
+            output_dir=tmp_path / "out",
+            include_third_party=True,
+            scope_hosts=frozenset({"cdn.example.test"}),
+            exclude_hosts=frozenset({"blocked.example.test"}),
+            retries=0,
+        ),
+    )
+
+    selected, skipped = recon._filter_script_urls(
+        {
+            "https://cdn.example.test/app.js",
+            "https://blocked.example.test/app.js",
+            "https://other.example.invalid/app.js",
+        }
+    )
+
+    assert "https://cdn.example.test/app.js" in selected
+    assert "https://other.example.invalid/app.js" in selected
+    assert "https://blocked.example.test/app.js" in skipped
+    assert not recon._can_process_url("https://blocked.example.test/app.js")
+
+
 def test_recon_sourcemap_error_and_edge_branches(tmp_path) -> None:  # type: ignore[no-untyped-def]
     recon = make_recon(tmp_path)
     output = tmp_path / "out" / "source_maps"

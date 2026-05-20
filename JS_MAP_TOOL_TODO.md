@@ -26,6 +26,7 @@ Status: public JavaScript/source-map reconnaissance helper.
    - Third-party scripts are skipped by default.
    - Skipped third-party script URLs are written for review.
    - `--include-third-party` opts in to processing third-party scripts.
+   - `--scope-host`, `--scope-host-file`, `--exclude-host`, and `--exclude-host-file` provide explicit allow/deny scope controls.
 
 6. Raw request preservation is documented.
    - Method, scheme, Host header, cookies, authorization headers, custom headers, and body content are preserved.
@@ -48,7 +49,7 @@ Status: public JavaScript/source-map reconnaissance helper.
 2. Add an optional JSONL secret-finding stream if integrations need append-only output.
 3. Add richer endpoint normalization without tying the tool to any one downstream workflow.
 4. Add fixtures for more source-map variants, including indexed source maps and missing `sourcesContent`.
-5. Consider configurable allow/deny host lists for broader multi-domain testing.
+5. Add a richer scope report that explains why each skipped script was skipped.
 
 ## Downstream Integration
 

@@ -220,6 +220,10 @@ def test_help_version_and_usage_errors(pipx_env: dict[str, str], tmp_path: Path)
         "--no-proxy",
         "--scheme",
         "--include-third-party",
+        "--scope-host",
+        "--scope-host-file",
+        "--exclude-host",
+        "--exclude-host-file",
         "--timeout",
         "--retries",
         "--delay",
@@ -408,6 +412,44 @@ def test_include_third_party_and_custom_proxy_process_external_hosts(
     assert any("cdn.example/vendor.js" in request for request in requests_seen)
     assert "/api/proxy-target" in endpoints
     assert "/api/proxy-vendor" in endpoints
+
+
+@pytest.mark.e2e
+def test_scope_and_exclude_host_files_control_external_hosts(tmp_path: Path, pipx_env: dict[str, str]) -> None:
+    output = tmp_path / "scope-output"
+    scope_file = tmp_path / "scope-hosts.txt"
+    exclude_file = tmp_path / "exclude-hosts.txt"
+    scope_file.write_text("cdn.example\n", encoding="utf-8")
+    exclude_file.write_text("target.example\n", encoding="utf-8")
+
+    with proxy_fixture() as (proxy_url, requests_seen):
+        run_cli(
+            pipx_env,
+            "-u",
+            "http://target.example/index.html",
+            "-o",
+            output,
+            "--proxy",
+            proxy_url,
+            "--scope-host-file",
+            scope_file,
+            "--exclude-host-file",
+            exclude_file,
+            "--timeout",
+            "5",
+            "--retries",
+            "0",
+        )
+
+    summary = read_json(output / "summary.json")
+    endpoints = (output / "all_endpoints_unique.txt").read_text(encoding="utf-8")
+
+    assert summary["scope_hosts"] == ["cdn.example"]
+    assert summary["exclude_hosts"] == ["target.example"]
+    assert any("cdn.example/vendor.js" in request for request in requests_seen)
+    assert not any("target.example/app.js" in request for request in requests_seen)
+    assert "/api/proxy-vendor" in endpoints
+    assert "/api/proxy-target" not in endpoints
 
 
 @pytest.mark.e2e
