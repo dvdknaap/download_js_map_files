@@ -8,6 +8,7 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from .colors import Colors
+from .headers import merge_headers
 from .models import ScannerConfig, ScanTarget
 from .recon import JavaScriptRecon
 from .request_parser import RequestParser
@@ -41,6 +42,20 @@ def create_parser() -> argparse.ArgumentParser:
 
     output_arguments = parser.add_argument_group("output")
     output_arguments.add_argument("-o", "--output", required=True, help="Output directory.")
+
+    request_context_arguments = parser.add_argument_group("request context")
+    request_context_arguments.add_argument(
+        "--header",
+        action="append",
+        metavar="HEADER",
+        help="Extra HTTP header in 'Name: value' format. Can be used multiple times.",
+    )
+    request_context_arguments.add_argument(
+        "--cookie",
+        action="append",
+        metavar="COOKIE",
+        help="Extra cookie in 'name=value' format. Can be used multiple times.",
+    )
 
     proxy_arguments = parser.add_argument_group("proxy and scope")
     proxy_arguments.add_argument(
@@ -111,8 +126,15 @@ def build_target(args: argparse.Namespace) -> ScanTarget:
     """Build a scanner target from parsed CLI arguments."""
 
     if args.url:
-        return ScanTarget(url=args.url)
-    return RequestParser.parse(args.request, scheme=args.scheme)
+        return ScanTarget(url=args.url, headers=merge_headers({}, args.header, args.cookie))
+
+    raw_target = RequestParser.parse(args.request, scheme=args.scheme)
+    return ScanTarget(
+        url=raw_target.url,
+        method=raw_target.method,
+        headers=merge_headers(raw_target.headers, args.header, args.cookie),
+        body=raw_target.body,
+    )
 
 
 def build_config(args: argparse.Namespace) -> ScannerConfig:

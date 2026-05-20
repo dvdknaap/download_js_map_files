@@ -10,6 +10,7 @@ A pipx-friendly CLI for security reconnaissance against JavaScript-heavy web app
 * Beautified fallback output for compiled or minified scripts without usable source maps.
 * Static scanning for common secret patterns, API paths, AJAX/fetch calls, full URLs, and RPC-like method definitions.
 * Raw HTTP request parsing with preserved method, headers, host, and body.
+* URL scans can add repeatable headers and cookies without requiring a raw request file.
 * Optional proxy support for Burp Suite, Caido, or similar tools.
 * Host allowlists and denylists with repeatable CLI flags or newline-based host files.
 
@@ -46,6 +47,16 @@ Scan from a raw HTTP request file:
 
 ```bash
 download_js_map_files -r request.txt --scheme https -o ./scan-output/example
+```
+
+Scan a URL with additional headers and cookies:
+
+```bash
+download_js_map_files -u https://example.com/app -o ./scan-output/example \
+  --header "Authorization: Bearer <token>" \
+  --header "X-Requested-With: XMLHttpRequest" \
+  --cookie "session=abc123" \
+  --cookie "theme=dark"
 ```
 
 Route traffic through the default local proxy:
@@ -104,6 +115,15 @@ The help output is grouped by workflow area and shows default values.
 | Argument | Description |
 |----------|-------------|
 | `-o`, `--output` | Required output directory. |
+
+### Request Context
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--header HEADER` | `None` | Extra HTTP header in `Name: value` format. Can be used multiple times. |
+| `--cookie COOKIE` | `None` | Extra cookie in `name=value` format. Can be used multiple times. Multiple cookies are sent as one `Cookie` header. |
+
+These options work for direct URL scans and raw request scans. When a CLI header repeats a header from a raw request file, the CLI value wins. CLI cookies are appended to an existing raw request `Cookie` header.
 
 ### Proxy And Scope
 

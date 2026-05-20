@@ -110,6 +110,20 @@ def recording_app_server() -> Iterator[tuple[str, list[dict[str, str]]]]:
     records: list[dict[str, str]] = []
 
     class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            records.append(
+                {
+                    "method": "GET",
+                    "path": self.path,
+                    "cookie": self.headers.get("Cookie", ""),
+                    "authorization": self.headers.get("Authorization", ""),
+                    "x_custom": self.headers.get("X-Custom", ""),
+                    "body": "",
+                }
+            )
+            html = '<script>fetch("/api/url-header-inline");</script>'
+            self._send(200, html, "text/html")
+
         def do_POST(self) -> None:
             length = int(self.headers.get("Content-Length", "0"))
             body = self.rfile.read(length).decode("utf-8")
@@ -216,6 +230,8 @@ def test_help_version_and_usage_errors(pipx_env: dict[str, str], tmp_path: Path)
         "--url",
         "--request",
         "--output",
+        "--header",
+        "--cookie",
         "--proxy",
         "--no-proxy",
         "--scheme",
@@ -242,6 +258,40 @@ def test_help_version_and_usage_errors(pipx_env: dict[str, str], tmp_path: Path)
     assert missing_output.returncode == 2
     assert missing_target.returncode == 2
     assert mutually_exclusive.returncode == 2
+
+
+@pytest.mark.e2e
+def test_url_mode_sends_repeatable_headers_and_cookies(tmp_path: Path, pipx_env: dict[str, str]) -> None:
+    output = tmp_path / "url-context-output"
+
+    with recording_app_server() as (base_url, records):
+        run_cli(
+            pipx_env,
+            "-u",
+            f"{base_url}/entry",
+            "-o",
+            output,
+            "--header",
+            "Authorization: Bearer url-token",
+            "--header",
+            "X-Custom: url-custom",
+            "--cookie",
+            "session=url",
+            "--cookie",
+            "theme=dark",
+        )
+
+    assert records == [
+        {
+            "method": "GET",
+            "path": "/entry",
+            "cookie": "session=url; theme=dark",
+            "authorization": "Bearer url-token",
+            "x_custom": "url-custom",
+            "body": "",
+        }
+    ]
+    assert "/api/url-header-inline" in (output / "all_endpoints_unique.txt").read_text(encoding="utf-8")
 
 
 @pytest.mark.e2e

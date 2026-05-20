@@ -12,13 +12,55 @@ def parse_args(*args: str) -> argparse.Namespace:
 
 
 def test_build_target_from_url() -> None:
-    args = parse_args("-u", "https://example.test/app", "-o", "out")
+    args = parse_args(
+        "-u",
+        "https://example.test/app",
+        "-o",
+        "out",
+        "--header",
+        "Authorization: Bearer token",
+        "--cookie",
+        "session=abc",
+        "--cookie",
+        "theme=dark",
+    )
 
     target = build_target(args)
 
     assert target.url == "https://example.test/app"
     assert target.method == "GET"
-    assert target.headers == {}
+    assert target.headers == {"Authorization": "Bearer token", "Cookie": "session=abc; theme=dark"}
+
+
+def test_build_target_merges_raw_request_headers_with_cli_context(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    request_file = tmp_path / "request.txt"
+    request_file.write_text(
+        "\n".join(
+            [
+                "GET /app HTTP/1.1",
+                "Host: example.test",
+                "Cookie: existing=1",
+                "Authorization: old",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    args = parse_args(
+        "-r",
+        str(request_file),
+        "-o",
+        "out",
+        "--header",
+        "Authorization: Bearer new",
+        "--cookie",
+        "session=abc",
+    )
+
+    target = build_target(args)
+
+    assert target.headers["Authorization"] == "Bearer new"
+    assert target.headers["Cookie"] == "existing=1; session=abc"
 
 
 def test_proxy_defaults_and_no_proxy_override() -> None:
@@ -80,6 +122,9 @@ def test_main_without_arguments_prints_help(capsys: pytest.CaptureFixture[str]) 
     output = capsys.readouterr().out
     assert "target selection" in output
     assert "network limits" in output
+    assert "request context" in output
+    assert "--header HEADER" in output
+    assert "--cookie COOKIE" in output
     assert "--scheme {http,https}" in output
     assert "(default: 20.0)" in output
 

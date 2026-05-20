@@ -30,6 +30,7 @@ Status: public JavaScript/source-map reconnaissance helper.
 
 6. Raw request preservation is documented.
    - Method, scheme, Host header, cookies, authorization headers, custom headers, and body content are preserved.
+   - URL mode supports repeatable `--header` and `--cookie` values for simpler authenticated scans.
 
 7. Exit and status semantics are stabilized.
    - Successful scans exit `0`, including scans with no source maps.
