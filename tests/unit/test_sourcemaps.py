@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from download_js_map_files.sourcemaps import detect_sourcemap_url, safe_source_path
+from download_js_map_files.sourcemaps import (
+    detect_sourcemap_url,
+    fallback_sourcemap_urls,
+    safe_source_path,
+    source_map_candidates,
+)
 
 
 def test_detect_sourcemap_from_headers_and_footer() -> None:
@@ -16,6 +21,26 @@ def test_detect_sourcemap_from_headers_and_footer() -> None:
         detect_sourcemap_url("https://example.test/app.js", "//# sourceMappingURL=data:application/json;base64,abc", {})
         is None
     )
+
+
+def test_fallback_sourcemap_urls_are_bounded_to_js_siblings() -> None:
+    assert fallback_sourcemap_urls("https://example.test/static/app.js?v=1") == [
+        "https://example.test/static/app.js.map",
+        "https://example.test/static/app.map",
+    ]
+    assert fallback_sourcemap_urls("https://example.test/static/app.min.js") == [
+        "https://example.test/static/app.min.js.map",
+        "https://example.test/static/app.js.map",
+        "https://example.test/static/app.min.map",
+    ]
+    assert fallback_sourcemap_urls("https://example.test/static/bundle") == ["https://example.test/static/bundle.map"]
+
+
+def test_source_map_candidates_prioritize_explicit_urls_and_deduplicate() -> None:
+    assert source_map_candidates("https://example.test/static/app.js", "", {"SourceMap": "app.js.map"}) == [
+        "https://example.test/static/app.js.map",
+        "https://example.test/static/app.map",
+    ]
 
 
 def test_safe_source_path_strips_traversal_urls_and_empty_values() -> None:

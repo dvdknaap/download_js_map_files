@@ -6,7 +6,7 @@ import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
-from urllib.parse import unquote, urljoin, urlsplit
+from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
 
 SOURCE_MAPPING_PATTERN = re.compile(r"""(?://|/\*)\s*[#@]\s*sourceMappingURL=([^\s'"]+)\s*(?:\*/)?""")
 
@@ -27,6 +27,49 @@ def detect_sourcemap_url(js_url: str, content: str, headers: Mapping[str, object
         return None
 
     return cast(str, urljoin(js_url, candidate))
+
+
+def fallback_sourcemap_urls(js_url: str) -> list[str]:
+    """Return bounded source-map URL candidates next to a JavaScript URL."""
+
+    parsed = urlsplit(js_url)
+    path = parsed.path
+    if not path:
+        return []
+
+    candidates: list[str] = []
+
+    def add(candidate_path: str) -> None:
+        candidate = urlunsplit((parsed.scheme, parsed.netloc, candidate_path, "", ""))
+        if candidate not in candidates:
+            candidates.append(candidate)
+
+    lower_path = path.lower()
+    if not lower_path.endswith(".map"):
+        add(f"{path}.map")
+
+    if lower_path.endswith(".min.js"):
+        add(f"{path[:-7]}.js.map")
+
+    if lower_path.endswith(".js"):
+        add(f"{path[:-3]}.map")
+
+    return candidates
+
+
+def source_map_candidates(js_url: str, content: str, headers: Mapping[str, object]) -> list[str]:
+    """Return explicit and fallback source-map candidates in priority order."""
+
+    candidates: list[str] = []
+    explicit_url = detect_sourcemap_url(js_url, content, headers)
+    if explicit_url:
+        candidates.append(explicit_url)
+
+    for fallback_url in fallback_sourcemap_urls(js_url):
+        if fallback_url not in candidates:
+            candidates.append(fallback_url)
+
+    return candidates
 
 
 def safe_source_path(source_path: str) -> Path:

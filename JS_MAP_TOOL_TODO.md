@@ -7,6 +7,7 @@ Status: public JavaScript/source-map reconnaissance helper.
 1. README and CLI behavior are synchronized.
    - Direct URL mode is available with `-u, --url`.
    - Raw HTTP request mode remains available with `-r, --request`.
+   - Source-map discovery includes automatic bounded sibling fallback probing when no explicit hint is present.
 
 2. Proxy behavior is explicit.
    - No proxy is used by default.

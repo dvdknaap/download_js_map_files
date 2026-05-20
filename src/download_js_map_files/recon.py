@@ -21,7 +21,7 @@ from .io import append_text, ensure_directory, unique_filename, write_text
 from .models import ScannerConfig, ScanResult, ScanTarget
 from .reports import ReportWriter
 from .scope import host_matches, normalize_host
-from .sourcemaps import detect_sourcemap_url, safe_source_path
+from .sourcemaps import safe_source_path, source_map_candidates
 
 
 class JavaScriptRecon:
@@ -237,15 +237,15 @@ class JavaScriptRecon:
 
         compiled_dir = self.config.output_dir / "compiled"
         sourcemap_dir = self.config.output_dir / "source_maps"
-        map_url = detect_sourcemap_url(js_url, response.text, response.headers)
-        record["source_map_url"] = map_url
-        map_success = bool(
-            map_url and self._can_process_url(map_url) and self._extract_sourcemap(map_url, sourcemap_dir)
-        )
+        map_urls = source_map_candidates(js_url, response.text, response.headers)
+        record["source_map_candidates"] = map_urls
+        record["source_map_url"] = map_urls[0] if map_urls else None
+        extracted_map_url = self._extract_first_sourcemap(map_urls, sourcemap_dir)
 
-        if map_success:
+        if extracted_map_url:
             self.source_maps_found += 1
             self.scripts_processed += 1
+            record["source_map_url"] = extracted_map_url
             record["status"] = "sourcemap_extracted"
             self.processed_scripts.append(record)
             return
@@ -259,6 +259,12 @@ class JavaScriptRecon:
         self.scripts_processed += 1
         record["status"] = "beautified_fallback"
         self.processed_scripts.append(record)
+
+    def _extract_first_sourcemap(self, map_urls: list[str], output_base: Path) -> str | None:
+        for map_url in map_urls:
+            if self._can_process_url(map_url) and self._extract_sourcemap(map_url, output_base):
+                return map_url
+        return None
 
     def _extract_sourcemap(self, map_url: str, output_base: Path) -> bool:
         try:

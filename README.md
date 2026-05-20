@@ -4,7 +4,7 @@ A pipx-friendly CLI for security reconnaissance against JavaScript-heavy web app
 
 ## Features
 
-* Source-map discovery through `SourceMap`/`X-SourceMap` headers and `sourceMappingURL` comments.
+* Source-map discovery through `SourceMap`/`X-SourceMap` headers, `sourceMappingURL` comments, and bounded automatic sibling fallback probing.
 * Safe source-map extraction that prevents path traversal outside the output directory.
 * Inline and external JavaScript processing.
 * Beautified fallback output for compiled or minified scripts without usable source maps.
@@ -180,6 +180,10 @@ The selected output directory can contain:
 ## Status Semantics
 
 The CLI exits `0` when a scan completes successfully, including scans where no source maps are found. Fatal target or output errors return a non-zero exit code. `summary.json` and the final console status use values such as `sourcemaps_found`, `beautified_only`, `no_scripts_found`, and `target_fetch_failed`. `summary.json` also records configured `scope_hosts` and `exclude_hosts`.
+
+## Source Map Discovery
+
+The scanner first honors explicit source-map hints from `SourceMap`/`X-SourceMap` headers and `sourceMappingURL` comments. When no usable hint exists, it automatically tries bounded sibling candidates next to the JavaScript file, such as `app.js.map`, `app.map`, and for `app.min.js` also `app.js.map`. These fallback probes stay within the normal scope rules.
 
 ## Raw Request Preservation
 

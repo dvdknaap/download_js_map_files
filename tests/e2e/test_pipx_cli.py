@@ -96,6 +96,23 @@ def write_fallback_site(root: Path) -> None:
     )
 
 
+def write_hintless_sourcemap_site(root: Path) -> None:
+    (root / "index.html").write_text('<script src="/hintless.js"></script>', encoding="utf-8")
+    (root / "hintless.js").write_text('console.log("hintless");', encoding="utf-8")
+    (root / "hintless.js.map").write_text(
+        json.dumps(
+            {
+                "version": 3,
+                "file": "hintless.js",
+                "sources": ["webpack:///src/hintless.js"],
+                "names": [],
+                "sourcesContent": ['fetch("/api/hintless-sourcemap");'],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def write_no_script_site(root: Path) -> None:
     (root / "index.html").write_text("<html><body>No JavaScript here</body></html>", encoding="utf-8")
 
@@ -406,6 +423,30 @@ def test_no_sourcemap_falls_back_to_beautified_compiled_js(
     assert summary["status"] == "beautified_only"
     assert (output / "compiled" / "fallback.min.js").exists()
     assert "/api/fallback-e2e" in (output / "all_endpoints_unique.txt").read_text(encoding="utf-8")
+
+
+@pytest.mark.e2e
+def test_hintless_sourcemap_is_probed_automatically(
+    tmp_path: Path,
+    serve_directory,
+    pipx_env: dict[str, str],
+) -> None:  # type: ignore[no-untyped-def]
+    site_root = tmp_path / "site"
+    output = tmp_path / "out"
+    site_root.mkdir()
+    write_hintless_sourcemap_site(site_root)
+
+    with serve_directory(site_root) as base_url:
+        run_cli(pipx_env, "-u", f"{base_url}/index.html", "-o", output)
+
+    summary = read_json(output / "summary.json")
+    processed = summary["scripts"]["processed"]  # type: ignore[index]
+
+    assert summary["status"] == "sourcemaps_found"
+    assert processed[-1]["source_map_url"].endswith("/hintless.js.map")
+    assert (output / "source_maps" / "src" / "hintless.js").exists()
+    assert not (output / "compiled" / "hintless.js").exists()
+    assert "/api/hintless-sourcemap" in (output / "all_endpoints_unique.txt").read_text(encoding="utf-8")
 
 
 @pytest.mark.e2e

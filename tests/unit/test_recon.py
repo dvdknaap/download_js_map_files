@@ -162,6 +162,16 @@ class FakeGetSession:
         return self.response
 
 
+class SequenceGetSession:
+    def __init__(self, responses: list[FakeResponse]) -> None:
+        self.responses = responses
+        self.urls: list[str] = []
+
+    def get(self, url: str, *_args: object, **_kwargs: object) -> FakeResponse:
+        self.urls.append(url)
+        return self.responses.pop(0)
+
+
 def make_recon(tmp_path, proxy: str | None = None) -> JavaScriptRecon:  # type: ignore[no-untyped-def]
     return JavaScriptRecon(
         ScanTarget(url="https://www.example.test/index.html"),
@@ -205,6 +215,35 @@ def test_recon_external_error_and_fallback_branches(tmp_path) -> None:  # type: 
     recon._process_single_external_js("https://example.test/static/asset")
 
     assert (tmp_path / "out" / "compiled" / "asset.js").exists()
+
+
+def test_recon_automatically_tries_sourcemap_fallback_candidates(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    recon = make_recon(tmp_path)
+    session = SequenceGetSession(
+        [
+            FakeResponse(text='console.log("hintless");'),
+            FakeResponse(status_code=404),
+            FakeResponse(
+                json_data={
+                    "sources": ["webpack:///src/hintless.js"],
+                    "names": [],
+                    "sourcesContent": ['fetch("/api/hintless-map");'],
+                }
+            ),
+        ]
+    )
+    recon.session = session  # type: ignore[assignment]
+
+    recon._process_single_external_js("https://example.test/static/hintless.js")
+
+    assert session.urls == [
+        "https://example.test/static/hintless.js",
+        "https://example.test/static/hintless.js.map",
+        "https://example.test/static/hintless.map",
+    ]
+    assert (tmp_path / "out" / "source_maps" / "src" / "hintless.js").exists()
+    assert not (tmp_path / "out" / "compiled" / "hintless.js").exists()
+    assert recon.processed_scripts[-1]["status"] == "sourcemap_extracted"
 
 
 def test_recon_include_third_party_and_size_limit_branches(tmp_path) -> None:  # type: ignore[no-untyped-def]
