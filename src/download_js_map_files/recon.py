@@ -349,19 +349,22 @@ class JavaScriptRecon:
             return content
 
     def _record_secret_findings(self, findings: list[SecretFinding], output_path: Path) -> None:
+        records: list[dict[str, Any]] = []
         for finding in findings:
             print(f"       {Colors.RED}{Colors.BOLD}{finding.header}{Colors.RESET}")
-            self.secret_records.append(
-                {
-                    "pattern": finding.name,
-                    "confidence": "pattern-match",
-                    "label": finding.label,
-                    "path": self.relative_output(output_path),
-                    "line_number": finding.line_number,
-                    "line_excerpt": finding.line_excerpt,
-                }
-            )
+            record = {
+                "type": "secret",
+                "pattern": finding.name,
+                "confidence": "pattern-match",
+                "label": finding.label,
+                "path": self.relative_output(output_path),
+                "line_number": finding.line_number,
+                "line_excerpt": finding.line_excerpt,
+            }
+            records.append(record)
+            self.secret_records.append(record)
         self.reporter.append_secret_findings(findings)
+        self.reporter.append_secret_export(records)
 
     def _scan_endpoints(self, content: str, label: str) -> None:
         findings = EndpointExtractor.extract(content)

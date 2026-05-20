@@ -34,6 +34,15 @@ class ReportWriter:
                 f"\n{header}\n{finding.line_excerpt}\n{'-' * len(header)}\n",
             )
 
+    def append_secret_export(self, records: list[dict[str, Any]]) -> None:
+        """Append secret findings as JSON lines for automation."""
+
+        if records:
+            append_text(
+                self.output_dir / "findings.jsonl",
+                "".join(f"{json.dumps(record, sort_keys=True)}\n" for record in records),
+            )
+
     def append_suspicious_variables(self, names: list[str], origin: str) -> list[str]:
         """Record suspicious source-map variable names and return the matches."""
 

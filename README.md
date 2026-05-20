@@ -171,11 +171,14 @@ The selected output directory can contain:
 * `urls.txt`: in-scope JavaScript URLs discovered on the page.
 * `skipped_third_party_urls.txt`: third-party script URLs recorded but not processed by default.
 * `findings.txt`: potential secrets and suspicious source-map variable names.
+* `findings.jsonl`: machine-readable secret findings, one JSON object per line.
 * `discovered_endpoints.txt`: detailed endpoint and RPC-like context.
 * `endpoints.jsonl`: machine-readable endpoint findings.
 * `all_endpoints_unique.txt`: unique URL/API path wordlist.
 * `clean_rpc_endpoints.txt`: extracted RPC/method-name wordlist.
 * `summary.json`: machine-readable scan status, limits, script processing records, generated files, and secret findings.
+
+Each `findings.jsonl` record includes `type`, `pattern`, `confidence`, `label`, `path`, `line_number`, and `line_excerpt`.
 
 ## Status Semantics
 

@@ -85,6 +85,9 @@ def test_recon_processes_inline_external_sourcemap_and_reports(  # type: ignore[
     urls = (output_dir / "urls.txt").read_text(encoding="utf-8")
     endpoints = (output_dir / "all_endpoints_unique.txt").read_text(encoding="utf-8")
     endpoint_export = (output_dir / "endpoints.jsonl").read_text(encoding="utf-8")
+    secret_export = [
+        json.loads(line) for line in (output_dir / "findings.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
     findings = (output_dir / "findings.txt").read_text(encoding="utf-8")
     rpc_names = (output_dir / "clean_rpc_endpoints.txt").read_text(encoding="utf-8")
     skipped = (output_dir / "skipped_third_party_urls.txt").read_text(encoding="utf-8")
@@ -104,6 +107,7 @@ def test_recon_processes_inline_external_sourcemap_and_reports(  # type: ignore[
     assert "GitHub Token" in findings
     assert "SUSPICIOUS VARIABLES" in findings
     assert "/api/source-fetch" in endpoint_export
+    assert any(record["type"] == "secret" and record["pattern"] == "Generic API Key" for record in secret_export)
     assert "AuthLogin" in rpc_names
     assert "FallbackAction" in rpc_names
     assert summary["status"] == "sourcemaps_found"

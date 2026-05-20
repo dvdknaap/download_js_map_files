@@ -341,6 +341,7 @@ def test_url_scan_extracts_sourcemap_and_skips_third_party_by_default(
 
     summary = read_json(output / "summary.json")
     skipped = (output / "skipped_third_party_urls.txt").read_text(encoding="utf-8")
+    secret_records = [json.loads(line) for line in (output / "findings.jsonl").read_text(encoding="utf-8").splitlines()]
 
     assert summary["status"] == "sourcemaps_found"
     assert summary["include_third_party"] is False
@@ -351,6 +352,8 @@ def test_url_scan_extracts_sourcemap_and_skips_third_party_by_default(
     assert "E2EAction" in (output / "clean_rpc_endpoints.txt").read_text(encoding="utf-8")
     assert "/api/e2e-inline" in (output / "endpoints.jsonl").read_text(encoding="utf-8")
     assert summary["secret_findings"]  # type: ignore[index]
+    assert secret_records[0]["type"] == "secret"
+    assert secret_records[0]["path"].startswith("inline_scripts/")
 
 
 @pytest.mark.e2e

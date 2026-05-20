@@ -21,6 +21,7 @@ Status: public JavaScript/source-map reconnaissance helper.
 4. Machine-readable output is available.
    - `summary.json` records scan status, scope, limits, scripts, generated files, and secret findings.
    - `endpoints.jsonl` records endpoint findings for automation.
+   - `findings.jsonl` records secret findings as append-only JSON lines.
    - Human-readable `urls.txt`, `findings.txt`, and endpoint text reports remain available.
 
 5. Scope controls are available.
@@ -48,7 +49,7 @@ Status: public JavaScript/source-map reconnaissance helper.
 ## Future Public Improvements
 
 1. Add optional structured logging levels, for example `--quiet` and `--verbose`.
-2. Add an optional JSONL secret-finding stream if integrations need append-only output.
+2. Add optional JSON schema documentation for `summary.json`, `endpoints.jsonl`, and `findings.jsonl`.
 3. Add richer endpoint normalization without tying the tool to any one downstream workflow.
 4. Add fixtures for more source-map variants, including indexed source maps and missing `sourcesContent`.
 5. Add a richer scope report that explains why each skipped script was skipped.

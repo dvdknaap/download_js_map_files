@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+
 from download_js_map_files.analysis.endpoints import EndpointFindings
+from download_js_map_files.analysis.secrets import SecretFinding
 from download_js_map_files.reports import ReportWriter
 
 
@@ -31,3 +34,38 @@ def test_report_writer_handles_empty_and_populated_reports(tmp_path) -> None:  #
     assert "cdn.example.test" in (tmp_path / "skipped_third_party_urls.txt").read_text(encoding="utf-8")
     assert '"status": "ok"' in (tmp_path / "summary.json").read_text(encoding="utf-8")
     assert "RpcName" in (tmp_path / "clean_rpc_endpoints.txt").read_text(encoding="utf-8")
+
+
+def test_report_writer_appends_secret_jsonl(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    writer = ReportWriter(tmp_path)
+    writer.append_secret_findings(
+        [SecretFinding(name="Generic API Key", label="Inline: a.js", line_number=3, line_excerpt='api_key = "abc"')]
+    )
+    writer.append_secret_export(
+        [
+            {
+                "type": "secret",
+                "pattern": "Generic API Key",
+                "confidence": "pattern-match",
+                "label": "Inline: a.js",
+                "path": "inline_scripts/a.js",
+                "line_number": 3,
+                "line_excerpt": 'api_key = "abc"',
+            }
+        ]
+    )
+
+    records = [json.loads(line) for line in (tmp_path / "findings.jsonl").read_text(encoding="utf-8").splitlines()]
+
+    assert "Generic API Key" in (tmp_path / "findings.txt").read_text(encoding="utf-8")
+    assert records == [
+        {
+            "type": "secret",
+            "pattern": "Generic API Key",
+            "confidence": "pattern-match",
+            "label": "Inline: a.js",
+            "path": "inline_scripts/a.js",
+            "line_number": 3,
+            "line_excerpt": 'api_key = "abc"',
+        }
+    ]
