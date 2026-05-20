@@ -197,6 +197,7 @@ def proxy_fixture() -> Iterator[tuple[str, list[str]]]:
 @pytest.mark.e2e
 def test_help_version_and_usage_errors(pipx_env: dict[str, str], tmp_path: Path) -> None:
     help_result = run_cli(pipx_env, "--help")
+    no_args_result = run_cli(pipx_env)
     version_result = run_cli(pipx_env, "--version")
     missing_output = run_cli(pipx_env, "-u", "http://example.test", check=False)
     missing_target = run_cli(pipx_env, "-o", tmp_path / "out", check=False)
@@ -226,6 +227,13 @@ def test_help_version_and_usage_errors(pipx_env: dict[str, str], tmp_path: Path)
         "--version",
     ):
         assert flag in help_result.stdout
+    for heading in ("target selection", "output", "proxy and scope", "raw request", "network limits", "metadata"):
+        assert heading in help_result.stdout
+        assert heading in no_args_result.stdout
+    assert no_args_result.returncode == 0
+    assert "--scheme {http,https}" in help_result.stdout
+    assert "(default: 20.0)" in help_result.stdout
+    assert "(default: 10485760)" in help_result.stdout
     assert "3.0.0" in version_result.stdout
     assert missing_output.returncode == 2
     assert missing_target.returncode == 2

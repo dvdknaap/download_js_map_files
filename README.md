@@ -28,6 +28,13 @@ make init
 
 ## Usage
 
+Show help. Running the command without arguments prints the same grouped help:
+
+```bash
+download_js_map_files
+download_js_map_files --help
+```
+
 Scan a URL directly:
 
 ```bash
@@ -70,21 +77,50 @@ Tune network bounds:
 download_js_map_files -u https://example.com -o ./scan-output/example --timeout 10 --retries 1 --delay 0.2 --max-file-size 5242880
 ```
 
-## Arguments
+## CLI Reference
+
+The help output is grouped by workflow area and shows default values.
+
+### Target Selection
 
 | Argument | Description |
 |----------|-------------|
 | `-u`, `--url` | Target URL to scan. Mutually exclusive with `--request`. |
 | `-r`, `--request` | Raw HTTP request file to parse. Mutually exclusive with `--url`. |
+
+### Output
+
+| Argument | Description |
+|----------|-------------|
 | `-o`, `--output` | Required output directory. |
-| `-p`, `--proxy` | Proxy URL. Defaults to `http://127.0.0.1:8080` when passed without a value. |
-| `--no-proxy` | Disable proxying. |
-| `--scheme` | Scheme used when parsing raw request files. Defaults to `https`. |
-| `--include-third-party` | Process third-party script URLs instead of only recording them as skipped. |
-| `--timeout` | HTTP timeout in seconds. Defaults to `20`. |
-| `--retries` | Retry count for transient HTTP failures. Defaults to `3`. |
-| `--delay` | Delay in seconds before each external script or source-map request. Defaults to `0`. |
-| `--max-file-size` | Maximum response size in bytes. Defaults to `10485760`. |
+
+### Proxy And Scope
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `-p`, `--proxy [URL]` | `None` | Enable proxying. Uses `http://127.0.0.1:8080` when passed without a URL. |
+| `--no-proxy` | `False` | Disable proxying even when `--proxy` is supplied. |
+| `--include-third-party` | `False` | Process third-party script URLs instead of only recording them as skipped. |
+
+### Raw Request
+
+| Argument | Choices | Default | Description |
+|----------|---------|---------|-------------|
+| `--scheme` | `http`, `https` | `https` | Scheme used when parsing raw request files. |
+
+### Network Limits
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--timeout` | `20.0` | HTTP timeout in seconds. |
+| `--retries` | `3` | Retry count for transient HTTP failures. |
+| `--delay` | `0.0` | Delay in seconds before each external script or source-map request. |
+| `--max-file-size` | `10485760` | Maximum response size in bytes for HTML, JavaScript, and source-map downloads. |
+
+### Metadata
+
+| Argument | Description |
+|----------|-------------|
 | `--version` | Print the installed CLI version. |
 
 ## Output Structure

@@ -68,6 +68,16 @@ def test_parser_requires_url_or_request() -> None:
         create_parser().parse_args([])
 
 
+def test_main_without_arguments_prints_help(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main([]) == 0
+
+    output = capsys.readouterr().out
+    assert "target selection" in output
+    assert "network limits" in output
+    assert "--scheme {http,https}" in output
+    assert "(default: 20.0)" in output
+
+
 def test_version_argument_exits(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit):
         create_parser().parse_args(["--version"])
