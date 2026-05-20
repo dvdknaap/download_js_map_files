@@ -84,6 +84,7 @@ def test_recon_processes_inline_external_sourcemap_and_reports(  # type: ignore[
 
     urls = (output_dir / "urls.txt").read_text(encoding="utf-8")
     endpoints = (output_dir / "all_endpoints_unique.txt").read_text(encoding="utf-8")
+    normalized_endpoints = (output_dir / "all_endpoints_normalized.txt").read_text(encoding="utf-8")
     endpoint_export = (output_dir / "endpoints.jsonl").read_text(encoding="utf-8")
     secret_export = [
         json.loads(line) for line in (output_dir / "findings.jsonl").read_text(encoding="utf-8").splitlines()
@@ -101,6 +102,7 @@ def test_recon_processes_inline_external_sourcemap_and_reports(  # type: ignore[
     assert (output_dir / "compiled" / "fallback.min.js").exists()
     assert list((output_dir / "inline_scripts").glob("inline_*.js"))
     assert "/api/inline" in endpoints
+    assert "/api/inline" in normalized_endpoints
     assert "/api/source-fetch" in endpoints
     assert "/api/fallback" in endpoints
     assert "Generic API Key" in findings
@@ -113,8 +115,42 @@ def test_recon_processes_inline_external_sourcemap_and_reports(  # type: ignore[
     assert summary["status"] == "sourcemaps_found"
     assert summary["endpoint_export"] == "endpoints.jsonl"
     assert summary["counts"]["skipped_third_party"] == 1
+    assert summary["counts"]["normalized_endpoints"] >= 1
     assert summary["secret_findings"][0]["path"]
     assert recon.relative_output(output_dir / "urls.txt") == "urls.txt"
+
+
+def test_recon_writes_manifest_and_scope_report(  # type: ignore[no-untyped-def]
+    tmp_path,
+    serve_directory,
+) -> None:
+    site_root = tmp_path / "site"
+    site_root.mkdir()
+    write_fixture_site(site_root)
+    output_dir = tmp_path / "out"
+
+    with serve_directory(site_root) as base_url:
+        JavaScriptRecon(
+            ScanTarget(url=f"{base_url}/index.html"),
+            ScannerConfig(output_dir=output_dir, proxy=None, timeout=5),
+        ).run()
+
+    summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
+    manifest = json.loads((output_dir / "artifact_manifest.json").read_text(encoding="utf-8"))
+    manifest_artifacts = {artifact["path"]: artifact for artifact in manifest["artifacts"]}
+    scope_report = json.loads((output_dir / "scope_report.json").read_text(encoding="utf-8"))
+    scope_decisions = {decision["url"]: decision for decision in scope_report["decisions"]}
+
+    assert summary["scope_report"] == "scope_report.json"
+    assert "artifact_manifest.json" in summary["files_written"]
+    assert manifest["schema_version"] == 1
+    assert manifest["artifact_count"] == len(manifest["artifacts"])
+    assert "summary.json" in manifest_artifacts
+    assert "artifact_manifest.json" not in manifest_artifacts
+    assert manifest_artifacts["summary.json"]["size_bytes"] == (output_dir / "summary.json").stat().st_size
+    assert len(manifest_artifacts["summary.json"]["sha256"]) == 64
+    assert scope_decisions["https://cdn.example.test/out-of-scope.js"]["reason"] == "out_of_scope_third_party"
+    assert scope_decisions["https://cdn.example.test/out-of-scope.js"]["selected"] is False
 
 
 def test_recon_handles_missing_initial_html(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -128,6 +164,7 @@ def test_recon_handles_missing_initial_html(tmp_path) -> None:  # type: ignore[n
     assert result.fatal is True
     assert result.status == "target_fetch_failed"
     assert (tmp_path / "out" / "summary.json").exists()
+    assert (tmp_path / "out" / "artifact_manifest.json").exists()
     assert not (tmp_path / "out" / "urls.txt").exists()
 
 
@@ -250,6 +287,71 @@ def test_recon_automatically_tries_sourcemap_fallback_candidates(tmp_path) -> No
     assert recon.processed_scripts[-1]["status"] == "sourcemap_extracted"
 
 
+def test_recon_extracts_indexed_sourcemaps(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    recon = make_recon(tmp_path)
+    recon.session = SequenceGetSession(
+        [
+            FakeResponse(text='console.log("indexed");\n//# sourceMappingURL=indexed.js.map'),
+            FakeResponse(
+                json_data={
+                    "sections": [
+                        {
+                            "offset": {"line": 0, "column": 0},
+                            "map": {
+                                "sourceRoot": "src",
+                                "sources": ["indexed-a.ts"],
+                                "names": [],
+                                "sourcesContent": ['fetch("/api/indexed-a");'],
+                            },
+                        },
+                        {
+                            "offset": {"line": 1, "column": 0},
+                            "map": {
+                                "sources": ["src/indexed-b.ts"],
+                                "names": [],
+                                "sourcesContent": ['fetch("/api/indexed-b");'],
+                            },
+                        },
+                    ]
+                }
+            ),
+        ]
+    )  # type: ignore[assignment]
+
+    recon._process_single_external_js("https://example.test/static/indexed.js")
+
+    assert (tmp_path / "out" / "source_maps" / "src" / "indexed-a.ts").exists()
+    assert (tmp_path / "out" / "source_maps" / "src" / "indexed-b.ts").exists()
+    assert recon.processed_scripts[-1]["status"] == "sourcemap_extracted"
+
+
+def test_recon_fetches_sources_when_sourcemap_has_no_sources_content(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    recon = make_recon(tmp_path)
+    session = SequenceGetSession(
+        [
+            FakeResponse(text='console.log("missing");\n//# sourceMappingURL=missing.js.map'),
+            FakeResponse(
+                json_data={
+                    "sources": ["src/original.ts"],
+                    "names": [],
+                }
+            ),
+            FakeResponse(text='fetch("/api/fetched-source");'),
+        ]
+    )
+    recon.session = session  # type: ignore[assignment]
+
+    recon._process_single_external_js("https://example.test/static/missing.js")
+
+    assert session.urls == [
+        "https://example.test/static/missing.js",
+        "https://example.test/static/missing.js.map",
+        "https://example.test/static/src/original.ts",
+    ]
+    assert (tmp_path / "out" / "source_maps" / "src" / "original.ts").exists()
+    assert recon.processed_scripts[-1]["status"] == "sourcemap_extracted"
+
+
 def test_recon_include_third_party_and_size_limit_branches(tmp_path) -> None:  # type: ignore[no-untyped-def]
     recon = JavaScriptRecon(
         ScanTarget(url="https://example.test/index.html"),
@@ -270,7 +372,7 @@ def test_recon_scope_allowlist_and_denylist_filtering(tmp_path) -> None:  # type
         ScannerConfig(
             output_dir=tmp_path / "out",
             include_third_party=True,
-            scope_hosts=frozenset({"cdn.example.test"}),
+            scope_hosts=frozenset({"cdn.other.test"}),
             exclude_hosts=frozenset({"blocked.example.test"}),
             retries=0,
         ),
@@ -278,16 +380,20 @@ def test_recon_scope_allowlist_and_denylist_filtering(tmp_path) -> None:  # type
 
     selected, skipped = recon._filter_script_urls(
         {
-            "https://cdn.example.test/app.js",
+            "https://cdn.other.test/app.js",
             "https://blocked.example.test/app.js",
             "https://other.example.invalid/app.js",
         }
     )
 
-    assert "https://cdn.example.test/app.js" in selected
+    assert "https://cdn.other.test/app.js" in selected
     assert "https://other.example.invalid/app.js" in selected
     assert "https://blocked.example.test/app.js" in skipped
     assert not recon._can_process_url("https://blocked.example.test/app.js")
+    decisions = {decision["url"]: decision for decision in recon.scope_decisions}
+    assert decisions["https://cdn.other.test/app.js"]["reason"] == "scope_host"
+    assert decisions["https://blocked.example.test/app.js"]["reason"] == "excluded_host"
+    assert decisions["https://other.example.invalid/app.js"]["reason"] == "include_third_party"
 
 
 def test_recon_sourcemap_error_and_edge_branches(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -304,7 +410,7 @@ def test_recon_sourcemap_error_and_edge_branches(tmp_path) -> None:  # type: ign
     assert recon._extract_sourcemap("https://example.test/app.js.map", output) is False
 
     recon.session = FakeGetSession(
-        FakeResponse(json_data={"sources": ["app.js"], "names": [], "sourcesContent": []})
+        FakeResponse(json_data={"sources": ["webpack:///app.js"], "names": [], "sourcesContent": []})
     )  # type: ignore[assignment]
     assert recon._extract_sourcemap("https://example.test/app.js.map", output) is False
 
@@ -314,6 +420,12 @@ def test_recon_sourcemap_error_and_edge_branches(tmp_path) -> None:  # type: ign
     assert recon._extract_sourcemap("https://example.test/app.js.map", output) is False
 
     recon.session = FakeGetSession(
-        FakeResponse(json_data={"sources": ["a.js", "b.js"], "names": ["safeName"], "sourcesContent": [None]})
+        FakeResponse(
+            json_data={
+                "sources": ["webpack:///a.js", "webpack:///b.js"],
+                "names": ["safeName"],
+                "sourcesContent": [None],
+            }
+        )
     )  # type: ignore[assignment]
     assert recon._extract_sourcemap("https://example.test/app.js.map", output) is False

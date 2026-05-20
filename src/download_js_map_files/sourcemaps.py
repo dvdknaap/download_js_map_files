@@ -4,11 +4,20 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
 
 SOURCE_MAPPING_PATTERN = re.compile(r"""(?://|/\*)\s*[#@]\s*sourceMappingURL=([^\s'"]+)\s*(?:\*/)?""")
+
+
+@dataclass(frozen=True)
+class SourceMapEntry:
+    """A source file referenced by a source map."""
+
+    path: str
+    content: str | None
 
 
 def detect_sourcemap_url(js_url: str, content: str, headers: Mapping[str, object]) -> str | None:
@@ -90,3 +99,61 @@ def safe_source_path(source_path: str) -> Path:
         return Path("source.js")
 
     return Path(*safe_parts)
+
+
+def extract_sourcemap_entries(map_json: Mapping[str, Any]) -> tuple[list[SourceMapEntry], list[str]]:
+    """Return flattened source entries and names for standard or indexed source maps."""
+
+    entries: list[SourceMapEntry] = []
+    names: list[str] = []
+
+    def collect(current_map: Mapping[str, Any]) -> None:
+        sections = current_map.get("sections")
+        if isinstance(sections, list):
+            for section in sections:
+                if not isinstance(section, dict):
+                    continue
+                section_map = section.get("map")
+                if isinstance(section_map, dict):
+                    collect(section_map)
+            return
+
+        source_root = current_map.get("sourceRoot", "")
+        prefix = source_root if isinstance(source_root, str) else ""
+        sources = _string_list(current_map.get("sources", []))
+        contents = current_map.get("sourcesContent", [])
+        names.extend(_string_list(current_map.get("names", [])))
+
+        for index, source in enumerate(sources):
+            content = None
+            if isinstance(contents, list) and index < len(contents) and contents[index] is not None:
+                content = str(contents[index])
+            entries.append(SourceMapEntry(path=_join_source_root(prefix, source), content=content))
+
+    collect(map_json)
+    return entries, names
+
+
+def resolve_source_url(map_url: str, source_path: str) -> str | None:
+    """Resolve a source-map source path to a fetchable URL when possible."""
+
+    parsed = urlsplit(source_path)
+    if parsed.scheme in {"http", "https"}:
+        return source_path
+    if parsed.scheme or source_path.startswith(("webpack://", "ng://", "file://")):
+        return None
+    return urljoin(map_url, source_path)
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
+def _join_source_root(source_root: str, source: str) -> str:
+    if not source_root:
+        return source
+    if urlsplit(source).scheme or source.startswith("/"):
+        return source
+    return f"{source_root.rstrip('/')}/{source.lstrip('/')}"

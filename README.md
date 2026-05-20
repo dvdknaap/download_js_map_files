@@ -5,14 +5,20 @@ A pipx-friendly CLI for security reconnaissance against JavaScript-heavy web app
 ## Features
 
 * Source-map discovery through `SourceMap`/`X-SourceMap` headers, `sourceMappingURL` comments, and bounded automatic sibling fallback probing.
+* Source-map extraction for standard maps, indexed maps with embedded sections, and fetchable source files when `sourcesContent` is missing.
 * Safe source-map extraction that prevents path traversal outside the output directory.
 * Inline and external JavaScript processing.
+* Automatic inline loader discovery for JavaScript file references that are inserted dynamically at runtime.
 * Beautified fallback output for compiled or minified scripts without usable source maps.
 * Static scanning for common secret patterns, API paths, AJAX/fetch calls, full URLs, and RPC-like method definitions.
 * Raw HTTP request parsing with preserved method, headers, host, and body.
 * URL scans can add repeatable headers and cookies without requiring a raw request file.
 * Optional proxy support for Burp Suite, Caido, or similar tools.
 * Host allowlists and denylists with repeatable CLI flags or newline-based host files.
+* Scope reporting that explains why each discovered script was selected or skipped.
+* Runtime output controls for quiet automation runs, verbose diagnostics, and colorless logs.
+* JSON Schema documentation for machine-readable JSON and JSONL outputs.
+* Artifact manifest output with SHA-256 hashes and file sizes for generated files.
 
 ## Installation
 
@@ -99,6 +105,13 @@ Tune network bounds:
 download_js_map_files -u https://example.com -o ./scan-output/example --timeout 10 --retries 1 --delay 0.2 --max-file-size 5242880
 ```
 
+Run quietly for automation, print extra diagnostics during troubleshooting, or disable ANSI colors for plain logs:
+
+```bash
+download_js_map_files -u https://example.com -o ./scan-output/example --quiet
+download_js_map_files -u https://example.com -o ./scan-output/example --verbose --no-color
+```
+
 ## CLI Reference
 
 The help output is grouped by workflow area and shows default values.
@@ -154,6 +167,14 @@ Host files are newline-based. Blank lines and comments beginning with `#` are ig
 | `--delay` | `0.0` | Delay in seconds before each external script or source-map request. |
 | `--max-file-size` | `10485760` | Maximum response size in bytes for HTML, JavaScript, and source-map downloads. |
 
+### Runtime Output
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--quiet` | `False` | Suppress scan progress output while preserving artifacts and exit codes. Mutually exclusive with `--verbose`. |
+| `--verbose` | `False` | Print extra scan diagnostics for target context, scope decisions, and source-map candidates. Mutually exclusive with `--quiet`. |
+| `--no-color` | `False` | Disable ANSI color output for plain logs and CI output capture. |
+
 ### Metadata
 
 | Argument | Description |
@@ -170,15 +191,30 @@ The selected output directory can contain:
 * `source_maps/_metadata/`: source-map `sources` and `names` intelligence.
 * `urls.txt`: in-scope JavaScript URLs discovered on the page.
 * `skipped_third_party_urls.txt`: third-party script URLs recorded but not processed by default.
+* `scope_report.json`: per-script scope decisions with host, selected/skipped status, reason, and matched scope rule.
 * `findings.txt`: potential secrets and suspicious source-map variable names.
 * `findings.jsonl`: machine-readable secret findings, one JSON object per line.
 * `discovered_endpoints.txt`: detailed endpoint and RPC-like context.
-* `endpoints.jsonl`: machine-readable endpoint findings.
+* `endpoints.jsonl`: machine-readable endpoint findings with original and normalized values.
 * `all_endpoints_unique.txt`: unique URL/API path wordlist.
+* `all_endpoints_normalized.txt`: normalized endpoint wordlist with generic placeholders for dynamic path and query values.
 * `clean_rpc_endpoints.txt`: extracted RPC/method-name wordlist.
 * `summary.json`: machine-readable scan status, limits, script processing records, generated files, and secret findings.
+* `artifact_manifest.json`: generated artifact inventory with relative paths, sizes, and SHA-256 hashes.
 
 Each `findings.jsonl` record includes `type`, `pattern`, `confidence`, `label`, `path`, `line_number`, and `line_excerpt`.
+
+## Machine-Readable Schemas
+
+JSON Schema files live in [`schemas/`](schemas/):
+
+* `summary.schema.json` documents `summary.json`.
+* `artifact-manifest.schema.json` documents `artifact_manifest.json`.
+* `scope-report.schema.json` documents `scope_report.json`.
+* `endpoint-record.schema.json` documents each `endpoints.jsonl` line.
+* `secret-finding-record.schema.json` documents each `findings.jsonl` line.
+
+For JSONL files, validate each non-empty line as a standalone JSON object.
 
 ## Status Semantics
 
@@ -187,6 +223,12 @@ The CLI exits `0` when a scan completes successfully, including scans where no s
 ## Source Map Discovery
 
 The scanner first honors explicit source-map hints from `SourceMap`/`X-SourceMap` headers and `sourceMappingURL` comments. When no usable hint exists, it automatically tries bounded sibling candidates next to the JavaScript file, such as `app.js.map`, `app.map`, and for `app.min.js` also `app.js.map`. These fallback probes stay within the normal scope rules.
+
+Standard source maps and indexed source maps with embedded `sections[].map` entries are flattened before extraction. When `sourcesContent` is missing, the scanner attempts to fetch relative or absolute `sources` URLs that remain inside the configured scope and network limits.
+
+## Dynamic Script Discovery
+
+Inline scripts are also scanned for quoted `.js` and `.mjs` file references. This catches common loader patterns that create script tags or use dynamic imports after the initial HTML is parsed, without requiring a browser runtime or an extra CLI flag.
 
 ## Raw Request Preservation
 

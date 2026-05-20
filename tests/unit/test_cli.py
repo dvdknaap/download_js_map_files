@@ -1,14 +1,30 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import pytest
 
 from download_js_map_files.cli import DEFAULT_PROXY, build_config, build_target, create_parser, main
+from download_js_map_files.colors import Colors, set_color_enabled
+from download_js_map_files.models import ScanResult
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
+    import tomli as tomllib
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def parse_args(*args: str) -> argparse.Namespace:
     return create_parser().parse_args(list(args))
+
+
+def project_version() -> str:
+    with (PROJECT_ROOT / "pyproject.toml").open("rb") as project_file:
+        metadata = tomllib.load(project_file)
+    return str(metadata["project"]["version"])
 
 
 def test_build_target_from_url() -> None:
@@ -90,6 +106,7 @@ def test_build_config_includes_scope_and_network_limits() -> None:
         "https://api.example.test:8443/path",
         "--exclude-host",
         "analytics.example.test",
+        "--verbose",
         "--timeout",
         "7.5",
         "--retries",
@@ -105,6 +122,7 @@ def test_build_config_includes_scope_and_network_limits() -> None:
     assert config.include_third_party is True
     assert config.scope_hosts == frozenset({"api.example.test"})
     assert config.exclude_hosts == frozenset({"analytics.example.test"})
+    assert config.verbose is True
     assert config.timeout == 7.5
     assert config.retries == 1
     assert config.delay == 0.25
@@ -114,6 +132,11 @@ def test_build_config_includes_scope_and_network_limits() -> None:
 def test_parser_requires_url_or_request() -> None:
     with pytest.raises(SystemExit):
         create_parser().parse_args([])
+
+
+def test_parser_rejects_quiet_and_verbose_together() -> None:
+    with pytest.raises(SystemExit):
+        parse_args("-u", "https://example.test", "-o", "out", "--quiet", "--verbose")
 
 
 def test_main_without_arguments_prints_help(capsys: pytest.CaptureFixture[str]) -> None:
@@ -126,7 +149,54 @@ def test_main_without_arguments_prints_help(capsys: pytest.CaptureFixture[str]) 
     assert "--header HEADER" in output
     assert "--cookie COOKIE" in output
     assert "--scheme {http,https}" in output
+    assert "--quiet" in output
+    assert "--verbose" in output
+    assert "--no-color" in output
     assert "(default: 20.0)" in output
+
+
+def test_quiet_suppresses_scan_output(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    class PrintingRecon:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            return
+
+        def run(self) -> ScanResult:
+            print("scan noise")
+            return ScanResult(status="no_scripts_found")
+
+    monkeypatch.setattr("download_js_map_files.cli.JavaScriptRecon", PrintingRecon)
+
+    assert main(["-u", "https://example.test", "-o", "out", "--quiet"]) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_no_color_disables_ansi_output(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    class PrintingRecon:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            return
+
+        def run(self) -> ScanResult:
+            print(f"{Colors.RED}colored{Colors.RESET}")
+            return ScanResult(status="no_scripts_found")
+
+    monkeypatch.setattr("download_js_map_files.cli.JavaScriptRecon", PrintingRecon)
+
+    try:
+        assert main(["-u", "https://example.test", "-o", "out", "--no-color"]) == 0
+        output = capsys.readouterr().out
+        assert output == "colored\n"
+        assert "\033[" not in output
+    finally:
+        set_color_enabled(True)
+
+
+def test_quiet_suppresses_cli_errors(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setattr(
+        "download_js_map_files.cli.build_target", lambda _args: (_ for _ in ()).throw(ValueError("bad"))
+    )
+
+    assert main(["-u", "https://example.test", "-o", "out", "--quiet"]) == 1
+    assert capsys.readouterr().out == ""
 
 
 def test_build_config_reads_scope_and_exclude_host_files(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -155,7 +225,7 @@ def test_version_argument_exits(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit):
         create_parser().parse_args(["--version"])
 
-    assert "3.0.0" in capsys.readouterr().out
+    assert project_version() in capsys.readouterr().out
 
 
 def test_main_handles_keyboard_interrupt(monkeypatch: pytest.MonkeyPatch) -> None:

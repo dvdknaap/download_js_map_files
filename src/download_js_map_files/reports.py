@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .analysis.endpoints import EndpointFindings
+from .analysis.endpoints import EndpointFindings, normalize_endpoint
 from .analysis.secrets import SecretFinding
 from .io import append_text, write_text
 
@@ -89,9 +89,9 @@ class ReportWriter:
         """Append endpoint findings as JSON lines for automation."""
 
         records: list[dict[str, str]] = []
-        records.extend({"source": label, "type": "api_path", "value": item} for item in sorted(findings.api_paths))
-        records.extend({"source": label, "type": "ajax_call", "value": item} for item in sorted(findings.ajax_calls))
-        records.extend({"source": label, "type": "full_url", "value": item} for item in sorted(findings.full_urls))
+        records.extend(self._endpoint_record(label, "api_path", item) for item in sorted(findings.api_paths))
+        records.extend(self._endpoint_record(label, "ajax_call", item) for item in sorted(findings.ajax_calls))
+        records.extend(self._endpoint_record(label, "full_url", item) for item in sorted(findings.full_urls))
 
         if records:
             append_text(
@@ -99,11 +99,31 @@ class ReportWriter:
                 "".join(f"{json.dumps(record, sort_keys=True)}\n" for record in records),
             )
 
-    def write_aggregated_endpoints(self, endpoints: set[str], rpc_names: set[str]) -> None:
+    @staticmethod
+    def _endpoint_record(label: str, finding_type: str, value: str) -> dict[str, str]:
+        return {
+            "source": label,
+            "type": finding_type,
+            "value": value,
+            "normalized_value": normalize_endpoint(value),
+        }
+
+    def write_aggregated_endpoints(
+        self,
+        endpoints: set[str],
+        rpc_names: set[str],
+        normalized_endpoints: set[str],
+    ) -> None:
         """Write unique endpoint and RPC wordlists."""
 
         if endpoints:
             write_text(self.output_dir / "all_endpoints_unique.txt", "".join(f"{item}\n" for item in sorted(endpoints)))
+
+        if normalized_endpoints:
+            write_text(
+                self.output_dir / "all_endpoints_normalized.txt",
+                "".join(f"{item}\n" for item in sorted(normalized_endpoints)),
+            )
 
         if rpc_names:
             write_text(self.output_dir / "clean_rpc_endpoints.txt", "".join(f"{item}\n" for item in sorted(rpc_names)))
@@ -118,3 +138,13 @@ class ReportWriter:
         """Write the machine-readable scan summary."""
 
         write_text(self.output_dir / "summary.json", json.dumps(summary, indent=2, sort_keys=True) + "\n")
+
+    def write_artifact_manifest(self, manifest: dict[str, Any]) -> None:
+        """Write file hashes for generated artifacts."""
+
+        write_text(self.output_dir / "artifact_manifest.json", json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+
+    def write_scope_report(self, report: dict[str, Any]) -> None:
+        """Write script scope decisions for review."""
+
+        write_text(self.output_dir / "scope_report.json", json.dumps(report, indent=2, sort_keys=True) + "\n")

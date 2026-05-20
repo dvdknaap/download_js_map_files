@@ -12,8 +12,19 @@ from threading import Thread
 
 import pytest
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
+    import tomli as tomllib
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 COMMAND_NAME = "download_js_map_files"
+
+
+def project_version() -> str:
+    with (PROJECT_ROOT / "pyproject.toml").open("rb") as project_file:
+        metadata = tomllib.load(project_file)
+    return str(metadata["project"]["version"])
 
 
 @pytest.fixture(scope="session")
@@ -57,6 +68,20 @@ def read_json(path: Path) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def read_json_lines(path: Path) -> list[dict[str, object]]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def read_schema(name: str) -> dict[str, object]:
+    return read_json(PROJECT_ROOT / "schemas" / name)
+
+
+def assert_schema_required_keys(record: dict[str, object], schema: dict[str, object]) -> None:
+    required = schema["required"]
+    assert isinstance(required, list)
+    assert set(required).issubset(record)
+
+
 def write_sourcemap_site(root: Path) -> None:
     static = root / "static"
     static.mkdir()
@@ -65,7 +90,11 @@ def write_sourcemap_site(root: Path) -> None:
         <html>
           <head><title>E2E Source Map Fixture</title></head>
           <body>
-            <script>const api_key = "abcdefghijklmnop"; fetch("/api/e2e-inline");</script>
+            <script>
+              const api_key = "abcdefghijklmnop";
+              fetch("/api/e2e-inline");
+              fetch("/api/orders/123?token=secret");
+            </script>
             <script src="/static/app.js"></script>
             <script src="https://cdn.example.invalid/vendor.js"></script>
           </body>
@@ -113,6 +142,52 @@ def write_hintless_sourcemap_site(root: Path) -> None:
     )
 
 
+def write_sourcemap_variant_site(root: Path) -> None:
+    static = root / "static"
+    source_dir = static / "src"
+    source_dir.mkdir(parents=True)
+    (root / "index.html").write_text(
+        '<script src="/static/indexed.js"></script><script src="/static/missing-content.js"></script>',
+        encoding="utf-8",
+    )
+    (static / "indexed.js").write_text('console.log("indexed");\n//# sourceMappingURL=indexed.js.map', encoding="utf-8")
+    (static / "indexed.js.map").write_text(
+        json.dumps(
+            {
+                "sections": [
+                    {
+                        "offset": {"line": 0, "column": 0},
+                        "map": {
+                            "sourceRoot": "src",
+                            "sources": ["indexed-a.ts"],
+                            "names": [],
+                            "sourcesContent": ['fetch("/api/e2e-indexed-a");'],
+                        },
+                    },
+                    {
+                        "offset": {"line": 1, "column": 0},
+                        "map": {
+                            "sources": ["src/indexed-b.ts"],
+                            "names": [],
+                            "sourcesContent": ['fetch("/api/e2e-indexed-b");'],
+                        },
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (static / "missing-content.js").write_text(
+        'console.log("missing");\n//# sourceMappingURL=missing-content.js.map',
+        encoding="utf-8",
+    )
+    (static / "missing-content.js.map").write_text(
+        json.dumps({"sources": ["src/missing.ts"], "names": []}),
+        encoding="utf-8",
+    )
+    (source_dir / "missing.ts").write_text('fetch("/api/e2e-missing-content");', encoding="utf-8")
+
+
 def write_no_script_site(root: Path) -> None:
     (root / "index.html").write_text("<html><body>No JavaScript here</body></html>", encoding="utf-8")
 
@@ -120,6 +195,22 @@ def write_no_script_site(root: Path) -> None:
 def write_oversize_site(root: Path) -> None:
     (root / "index.html").write_text('<script src="/large.js"></script>', encoding="utf-8")
     (root / "large.js").write_text("x" * 512, encoding="utf-8")
+
+
+def write_dynamic_script_site(root: Path) -> None:
+    chunks = root / "chunks"
+    chunks.mkdir()
+    (root / "index.html").write_text(
+        """
+        <script>
+          const script = document.createElement("script");
+          script.src = "/chunks/runtime.js";
+          document.head.appendChild(script);
+        </script>
+        """,
+        encoding="utf-8",
+    )
+    (chunks / "runtime.js").write_text('fetch("/api/dynamic-runtime");', encoding="utf-8")
 
 
 @contextmanager
@@ -242,6 +333,16 @@ def test_help_version_and_usage_errors(pipx_env: dict[str, str], tmp_path: Path)
         tmp_path / "out",
         check=False,
     )
+    mutually_exclusive_output = run_cli(
+        pipx_env,
+        "-u",
+        "http://example.test",
+        "-o",
+        tmp_path / "out",
+        "--quiet",
+        "--verbose",
+        check=False,
+    )
 
     for flag in (
         "--url",
@@ -261,20 +362,70 @@ def test_help_version_and_usage_errors(pipx_env: dict[str, str], tmp_path: Path)
         "--retries",
         "--delay",
         "--max-file-size",
+        "--quiet",
+        "--verbose",
+        "--no-color",
         "--version",
     ):
         assert flag in help_result.stdout
-    for heading in ("target selection", "output", "proxy and scope", "raw request", "network limits", "metadata"):
+    for heading in (
+        "target selection",
+        "output",
+        "proxy and scope",
+        "raw request",
+        "network limits",
+        "runtime output",
+        "metadata",
+    ):
         assert heading in help_result.stdout
         assert heading in no_args_result.stdout
     assert no_args_result.returncode == 0
     assert "--scheme {http,https}" in help_result.stdout
     assert "(default: 20.0)" in help_result.stdout
     assert "(default: 10485760)" in help_result.stdout
-    assert "3.0.0" in version_result.stdout
+    assert project_version() in version_result.stdout
     assert missing_output.returncode == 2
     assert missing_target.returncode == 2
     assert mutually_exclusive.returncode == 2
+    assert mutually_exclusive_output.returncode == 2
+
+
+@pytest.mark.e2e
+def test_runtime_output_flags_control_console_output(
+    tmp_path: Path,
+    serve_directory,
+    pipx_env: dict[str, str],
+) -> None:  # type: ignore[no-untyped-def]
+    site_root = tmp_path / "site"
+    site_root.mkdir()
+    write_no_script_site(site_root)
+
+    with serve_directory(site_root) as base_url:
+        quiet_output = tmp_path / "quiet"
+        quiet_result = run_cli(pipx_env, "-u", f"{base_url}/index.html", "-o", quiet_output, "--quiet")
+        no_color_result = run_cli(
+            pipx_env,
+            "-u",
+            f"{base_url}/index.html",
+            "-o",
+            tmp_path / "no-color",
+            "--no-color",
+        )
+        verbose_result = run_cli(
+            pipx_env,
+            "-u",
+            f"{base_url}/index.html",
+            "-o",
+            tmp_path / "verbose",
+            "--verbose",
+        )
+
+    assert quiet_result.stdout == ""
+    assert (quiet_output / "summary.json").exists()
+    assert "Starting analysis" in no_color_result.stdout
+    assert "\033[" not in no_color_result.stdout
+    assert "[v] Target method: GET" in verbose_result.stdout
+    assert "[v] Output directory:" in verbose_result.stdout
 
 
 @pytest.mark.e2e
@@ -341,7 +492,16 @@ def test_url_scan_extracts_sourcemap_and_skips_third_party_by_default(
 
     summary = read_json(output / "summary.json")
     skipped = (output / "skipped_third_party_urls.txt").read_text(encoding="utf-8")
-    secret_records = [json.loads(line) for line in (output / "findings.jsonl").read_text(encoding="utf-8").splitlines()]
+    endpoint_records = read_json_lines(output / "endpoints.jsonl")
+    secret_records = read_json_lines(output / "findings.jsonl")
+    summary_schema = read_schema("summary.schema.json")
+    manifest_schema = read_schema("artifact-manifest.schema.json")
+    scope_schema = read_schema("scope-report.schema.json")
+    endpoint_schema = read_schema("endpoint-record.schema.json")
+    secret_schema = read_schema("secret-finding-record.schema.json")
+    manifest = read_json(output / "artifact_manifest.json")
+    manifest_artifacts = {artifact["path"]: artifact for artifact in manifest["artifacts"]}  # type: ignore[index]
+    scope_report = read_json(output / "scope_report.json")
 
     assert summary["status"] == "sourcemaps_found"
     assert summary["include_third_party"] is False
@@ -351,9 +511,20 @@ def test_url_scan_extracts_sourcemap_and_skips_third_party_by_default(
     assert not (output / "escape.js").exists()
     assert "E2EAction" in (output / "clean_rpc_endpoints.txt").read_text(encoding="utf-8")
     assert "/api/e2e-inline" in (output / "endpoints.jsonl").read_text(encoding="utf-8")
+    assert "/api/orders/{id}?token={value}" in (output / "all_endpoints_normalized.txt").read_text(encoding="utf-8")
     assert summary["secret_findings"]  # type: ignore[index]
     assert secret_records[0]["type"] == "secret"
     assert secret_records[0]["path"].startswith("inline_scripts/")
+    assert_schema_required_keys(summary, summary_schema)
+    assert_schema_required_keys(manifest, manifest_schema)
+    assert_schema_required_keys(scope_report, scope_schema)
+    assert_schema_required_keys(endpoint_records[0], endpoint_schema)
+    assert_schema_required_keys(secret_records[0], secret_schema)
+    assert "artifact_manifest.json" in summary["files_written"]  # type: ignore[operator]
+    assert summary["scope_report"] == "scope_report.json"
+    assert "summary.json" in manifest_artifacts
+    assert len(manifest_artifacts["summary.json"]["sha256"]) == 64
+    assert any(record["normalized_value"] == "/api/orders/{id}?token={value}" for record in endpoint_records)
 
 
 @pytest.mark.e2e
@@ -429,6 +600,28 @@ def test_no_sourcemap_falls_back_to_beautified_compiled_js(
 
 
 @pytest.mark.e2e
+def test_inline_dynamic_script_reference_is_processed(
+    tmp_path: Path,
+    serve_directory,
+    pipx_env: dict[str, str],
+) -> None:  # type: ignore[no-untyped-def]
+    site_root = tmp_path / "site"
+    output = tmp_path / "out"
+    site_root.mkdir()
+    write_dynamic_script_site(site_root)
+
+    with serve_directory(site_root) as base_url:
+        run_cli(pipx_env, "-u", f"{base_url}/index.html", "-o", output)
+
+    summary = read_json(output / "summary.json")
+
+    assert summary["status"] == "beautified_only"
+    assert f"{base_url}/chunks/runtime.js" in (output / "urls.txt").read_text(encoding="utf-8")
+    assert (output / "compiled" / "runtime.js").exists()
+    assert "/api/dynamic-runtime" in (output / "all_endpoints_unique.txt").read_text(encoding="utf-8")
+
+
+@pytest.mark.e2e
 def test_hintless_sourcemap_is_probed_automatically(
     tmp_path: Path,
     serve_directory,
@@ -450,6 +643,32 @@ def test_hintless_sourcemap_is_probed_automatically(
     assert (output / "source_maps" / "src" / "hintless.js").exists()
     assert not (output / "compiled" / "hintless.js").exists()
     assert "/api/hintless-sourcemap" in (output / "all_endpoints_unique.txt").read_text(encoding="utf-8")
+
+
+@pytest.mark.e2e
+def test_sourcemap_variants_indexed_and_missing_sources_content(
+    tmp_path: Path,
+    serve_directory,
+    pipx_env: dict[str, str],
+) -> None:  # type: ignore[no-untyped-def]
+    site_root = tmp_path / "site"
+    output = tmp_path / "out"
+    site_root.mkdir()
+    write_sourcemap_variant_site(site_root)
+
+    with serve_directory(site_root) as base_url:
+        run_cli(pipx_env, "-u", f"{base_url}/index.html", "-o", output)
+
+    summary = read_json(output / "summary.json")
+    endpoints = (output / "all_endpoints_unique.txt").read_text(encoding="utf-8")
+
+    assert summary["status"] == "sourcemaps_found"
+    assert summary["counts"]["source_maps_found"] == 2  # type: ignore[index]
+    assert (output / "source_maps" / "src" / "indexed-a.ts").exists()
+    assert (output / "source_maps" / "src" / "indexed-b.ts").exists()
+    assert (output / "source_maps" / "src" / "missing.ts").exists()
+    assert "/api/e2e-indexed-a" in endpoints
+    assert "/api/e2e-missing-content" in endpoints
 
 
 @pytest.mark.e2e
@@ -536,14 +755,20 @@ def test_scope_and_exclude_host_files_control_external_hosts(tmp_path: Path, pip
         )
 
     summary = read_json(output / "summary.json")
+    scope_report = read_json(output / "scope_report.json")
+    decisions = {decision["url"]: decision for decision in scope_report["decisions"]}  # type: ignore[index]
     endpoints = (output / "all_endpoints_unique.txt").read_text(encoding="utf-8")
 
     assert summary["scope_hosts"] == ["cdn.example"]
     assert summary["exclude_hosts"] == ["target.example"]
+    assert summary["scope_report"] == "scope_report.json"
     assert any("cdn.example/vendor.js" in request for request in requests_seen)
     assert not any("target.example/app.js" in request for request in requests_seen)
     assert "/api/proxy-vendor" in endpoints
     assert "/api/proxy-target" not in endpoints
+    assert decisions["http://cdn.example/vendor.js"]["reason"] == "scope_host"
+    assert decisions["http://target.example/app.js"]["reason"] == "excluded_host"
+    assert decisions["http://target.example/app.js"]["selected"] is False
 
 
 @pytest.mark.e2e

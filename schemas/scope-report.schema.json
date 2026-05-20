@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/dvdknaap/download_js_map_files/schemas/scope-report.schema.json",
+  "title": "download_js_map_files scope_report.json",
+  "type": "object",
+  "required": ["schema_version", "base_domain", "include_third_party", "scope_hosts", "exclude_hosts", "decisions"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "base_domain": {"type": "string"},
+    "include_third_party": {"type": "boolean"},
+    "scope_hosts": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "exclude_hosts": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["url", "host", "selected", "reason", "matched_host"],
+        "properties": {
+          "url": {"type": "string", "format": "uri"},
+          "host": {"type": "string"},
+          "selected": {"type": "boolean"},
+          "reason": {
+            "type": "string",
+            "enum": ["base_domain", "scope_host", "include_third_party", "excluded_host", "out_of_scope_third_party"]
+          },
+          "matched_host": {
+            "type": ["string", "null"]
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

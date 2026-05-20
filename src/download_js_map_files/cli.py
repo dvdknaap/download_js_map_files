@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import io
 import sys
+from contextlib import redirect_stdout
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-from .colors import Colors
+from .colors import Colors, set_color_enabled
 from .headers import merge_headers
 from .models import ScannerConfig, ScanTarget
 from .recon import JavaScriptRecon
@@ -117,6 +119,12 @@ def create_parser() -> argparse.ArgumentParser:
         help="Maximum response size in bytes for HTML, JavaScript, and source-map downloads.",
     )
 
+    runtime_output_arguments = parser.add_argument_group("runtime output")
+    verbosity_group = runtime_output_arguments.add_mutually_exclusive_group()
+    verbosity_group.add_argument("--quiet", action="store_true", help="Suppress scan progress output.")
+    verbosity_group.add_argument("--verbose", action="store_true", help="Print extra scan diagnostics.")
+    runtime_output_arguments.add_argument("--no-color", action="store_true", help="Disable ANSI color output.")
+
     metadata_arguments = parser.add_argument_group("metadata")
     metadata_arguments.add_argument("--version", action="version", version=f"%(prog)s {package_version()}")
     return parser
@@ -153,7 +161,18 @@ def build_config(args: argparse.Namespace) -> ScannerConfig:
         include_third_party=args.include_third_party,
         scope_hosts=scope_hosts,
         exclude_hosts=exclude_hosts,
+        verbose=args.verbose,
     )
+
+
+def run_scan(args: argparse.Namespace) -> int:
+    """Build and run a scan from parsed CLI arguments."""
+
+    if args.request:
+        print(f"{Colors.HEADER}[*] Parsing Request File: {args.request}{Colors.RESET}")
+    recon = JavaScriptRecon(target=build_target(args), config=build_config(args))
+    result = recon.run()
+    return 2 if result.fatal else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -166,16 +185,19 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     args = parser.parse_args(effective_argv)
+    quiet = bool(args.quiet)
+    set_color_enabled(not args.no_color)
 
     try:
-        if args.request:
-            print(f"{Colors.HEADER}[*] Parsing Request File: {args.request}{Colors.RESET}")
-        recon = JavaScriptRecon(target=build_target(args), config=build_config(args))
-        result = recon.run()
-        return 2 if result.fatal else 0
+        if quiet:
+            with redirect_stdout(io.StringIO()):
+                return run_scan(args)
+        return run_scan(args)
     except KeyboardInterrupt:
-        print(f"\n{Colors.YELLOW}[!] Interrupted by user.{Colors.RESET}")
+        if not quiet:
+            print(f"\n{Colors.YELLOW}[!] Interrupted by user.{Colors.RESET}")
         return 130
     except (OSError, ValueError) as exc:
-        print(f"{Colors.RED}Fatal Error: {exc}{Colors.RESET}")
+        if not quiet:
+            print(f"{Colors.RED}Fatal Error: {exc}{Colors.RESET}")
         return 1

@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from urllib.parse import parse_qsl, unquote, urlsplit, urlunsplit
+
+UUID_SEGMENT = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+HEX_SEGMENT = re.compile(r"^[0-9a-fA-F]{8,}$")
+NUMBER_SEGMENT = re.compile(r"^[0-9]+$")
 
 
 @dataclass(frozen=True)
@@ -26,6 +31,68 @@ class EndpointFindings:
         """Return URL-like findings that can be aggregated globally."""
 
         return set().union(self.api_paths, self.full_urls, self.ajax_calls)
+
+    @property
+    def normalized_endpoints(self) -> set[str]:
+        """Return normalized URL-like findings for generic automation."""
+
+        return {normalize_endpoint(endpoint) for endpoint in self.standard_endpoints}
+
+
+def normalize_endpoint(value: str) -> str:
+    """Return a stable endpoint shape while preserving the original finding elsewhere."""
+
+    cleaned = value.strip().strip("\"'").rstrip(");,")
+    if not cleaned:
+        return cleaned
+
+    parsed = urlsplit(cleaned)
+    normalized_path = _normalize_path(parsed.path)
+    normalized_query = _normalize_query(parsed.query)
+
+    if parsed.scheme and parsed.netloc:
+        return urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), normalized_path or "/", normalized_query, ""))
+
+    if parsed.netloc:
+        return urlunsplit(("", parsed.netloc.lower(), normalized_path or "/", normalized_query, ""))
+
+    if "?" in cleaned:
+        path, _, query = cleaned.partition("?")
+        return _join_path_query(_normalize_path(path), _normalize_query(query))
+
+    return _normalize_path(cleaned)
+
+
+def _normalize_path(path: str) -> str:
+    decoded_path = unquote(path)
+    leading_slash = decoded_path.startswith("/")
+    segments = [segment for segment in decoded_path.split("/") if segment]
+    normalized = [_normalize_segment(segment) for segment in segments]
+    prefix = "/" if leading_slash else ""
+    return prefix + "/".join(normalized)
+
+
+def _normalize_segment(segment: str) -> str:
+    if UUID_SEGMENT.fullmatch(segment):
+        return "{uuid}"
+    if NUMBER_SEGMENT.fullmatch(segment):
+        return "{id}"
+    if HEX_SEGMENT.fullmatch(segment):
+        return "{hex}"
+    return segment
+
+
+def _normalize_query(query: str) -> str:
+    if not query:
+        return ""
+    pairs = parse_qsl(query, keep_blank_values=True)
+    return "&".join(f"{key}={{value}}" for key, _value in sorted(pairs))
+
+
+def _join_path_query(path: str, query: str) -> str:
+    if not query:
+        return path
+    return f"{path}?{query}"
 
 
 class EndpointExtractor:

@@ -14,6 +14,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from .analysis.endpoints import EndpointExtractor
+from .analysis.scripts import extract_script_references
 from .analysis.secrets import SecretFinding, SecretScanner
 from .colors import Colors
 from .http import create_session
@@ -21,7 +22,7 @@ from .io import append_text, ensure_directory, unique_filename, write_text
 from .models import ScannerConfig, ScanResult, ScanTarget
 from .reports import ReportWriter
 from .scope import host_matches, normalize_host
-from .sourcemaps import safe_source_path, source_map_candidates
+from .sourcemaps import extract_sourcemap_entries, resolve_source_url, safe_source_path, source_map_candidates
 
 
 class JavaScriptRecon:
@@ -34,10 +35,12 @@ class JavaScriptRecon:
         self.session = create_session(target.headers, config.proxy, config.retries)
         self.reporter = ReportWriter(config.output_dir)
         self.all_discovered_endpoints: set[str] = set()
+        self.normalized_endpoints: set[str] = set()
         self.clean_rpc_names: set[str] = set()
         self.discovered_script_urls: set[str] = set()
         self.in_scope_script_urls: set[str] = set()
         self.skipped_third_party_urls: set[str] = set()
+        self.scope_decisions: list[dict[str, Any]] = []
         self.processed_scripts: list[dict[str, Any]] = []
         self.secret_records: list[dict[str, Any]] = []
         self.source_maps_found = 0
@@ -54,7 +57,7 @@ class JavaScriptRecon:
         if not html_content:
             print(f"{Colors.RED}[!] Critical: Could not retrieve target HTML. Aborting.{Colors.RESET}")
             status = "target_fetch_failed"
-            self.reporter.write_summary(self._build_summary(status))
+            self._write_final_machine_reports(status)
             return ScanResult(status=status, fatal=True)
 
         soup = BeautifulSoup(html_content, "html.parser")
@@ -71,16 +74,23 @@ class JavaScriptRecon:
         print(f"{Colors.BLUE}[*] Found {len(self.in_scope_script_urls)} scripts selected for processing.{Colors.RESET}")
         skipped_count = len(self.skipped_third_party_urls)
         print(f"{Colors.YELLOW}[*] Recorded {skipped_count} skipped third-party scripts.{Colors.RESET}")
+        if self.skipped_third_party_urls:
+            self._verbose(f"Skipped third-party scripts: {', '.join(sorted(self.skipped_third_party_urls))}")
         self.reporter.write_url_list(self.in_scope_script_urls)
         self.reporter.write_skipped_third_party(self.skipped_third_party_urls)
+        self.reporter.write_scope_report(self._build_scope_report())
 
         for index, js_url in enumerate(sorted(self.in_scope_script_urls), start=1):
             print(f"    [{index}/{len(self.in_scope_script_urls)}] Processing...", end="\r")
             self._process_single_external_js(js_url)
 
-        self.reporter.write_aggregated_endpoints(self.all_discovered_endpoints, self.clean_rpc_names)
+        self.reporter.write_aggregated_endpoints(
+            self.all_discovered_endpoints,
+            self.clean_rpc_names,
+            self.normalized_endpoints,
+        )
         status = self._final_status()
-        self.reporter.write_summary(self._build_summary(status))
+        self._write_final_machine_reports(status)
         print(f"{Colors.BLUE}[i] Final status: {status}{Colors.RESET}")
         print(f"\n{Colors.GREEN}[+] Reconnaissance complete. Results: {self.config.output_dir.resolve()}{Colors.RESET}")
         return ScanResult(status=status)
@@ -88,6 +98,9 @@ class JavaScriptRecon:
     def _print_startup(self) -> None:
         print(f"{Colors.HEADER}[*] Starting analysis on: {self.target.url}{Colors.RESET}")
         print(f"{Colors.BLUE}[i] Scope: {self.base_domain}{Colors.RESET}")
+        self._verbose(f"Target method: {self.target.method}")
+        self._verbose(f"Output directory: {self.config.output_dir.resolve()}")
+        self._verbose(f"Include third-party: {self.config.include_third_party}")
         if self.config.scope_hosts:
             print(
                 f"{Colors.BLUE}[i] Additional scope hosts: {', '.join(sorted(self.config.scope_hosts))}{Colors.RESET}"
@@ -144,21 +157,69 @@ class JavaScriptRecon:
                 clean_value = value.strip()
                 if clean_value and not clean_value.startswith(("data:", "blob:", "mailto:")):
                     js_urls.add(urljoin(self.target.url, clean_value))
+            if not script.get("src"):
+                content = script.string or script.get_text()
+                for reference in extract_script_references(content):
+                    js_urls.add(urljoin(self.target.url, reference))
         return js_urls
 
     def _filter_script_urls(self, urls: set[str]) -> tuple[set[str], set[str]]:
         selected: set[str] = set()
         skipped: set[str] = set()
+        self.scope_decisions = []
 
         for script_url in urls:
-            if self._is_excluded_url(script_url):
-                skipped.add(script_url)
-            elif self.config.include_third_party or self._is_in_scope(script_url):
+            decision = self._scope_decision(script_url)
+            self.scope_decisions.append(decision)
+            if decision["selected"]:
                 selected.add(script_url)
             else:
                 skipped.add(script_url)
 
         return selected, skipped
+
+    def _scope_decision(self, script_url: str) -> dict[str, Any]:
+        parsed = urlparse(script_url)
+        domain = normalize_host(parsed.hostname or parsed.netloc)
+        decision: dict[str, Any] = {
+            "url": script_url,
+            "host": domain,
+            "selected": False,
+            "reason": "out_of_scope_third_party",
+            "matched_host": None,
+        }
+
+        excluded_host = self._matching_host(domain, self.config.exclude_hosts)
+        if excluded_host:
+            decision["reason"] = "excluded_host"
+            decision["matched_host"] = excluded_host
+            return decision
+
+        if host_matches(domain, self.base_domain):
+            decision["selected"] = True
+            decision["reason"] = "base_domain"
+            decision["matched_host"] = self.base_domain
+            return decision
+
+        scope_host = self._matching_host(domain, self.config.scope_hosts)
+        if scope_host:
+            decision["selected"] = True
+            decision["reason"] = "scope_host"
+            decision["matched_host"] = scope_host
+            return decision
+
+        if self.config.include_third_party:
+            decision["selected"] = True
+            decision["reason"] = "include_third_party"
+
+        return decision
+
+    @staticmethod
+    def _matching_host(domain: str, candidates: frozenset[str]) -> str | None:
+        for candidate in sorted(candidates):
+            if host_matches(domain, candidate):
+                return candidate
+        return None
 
     def _process_inline_scripts(self, soup: BeautifulSoup, html_content: str) -> None:
         inline_dir = self.config.output_dir / "inline_scripts"
@@ -240,6 +301,8 @@ class JavaScriptRecon:
         map_urls = source_map_candidates(js_url, response.text, response.headers)
         record["source_map_candidates"] = map_urls
         record["source_map_url"] = map_urls[0] if map_urls else None
+        if map_urls:
+            self._verbose(f"Source-map candidates for {js_url}: {', '.join(map_urls)}")
         extracted_map_url = self._extract_first_sourcemap(map_urls, sourcemap_dir)
 
         if extracted_map_url:
@@ -281,35 +344,51 @@ class JavaScriptRecon:
             print(f"    {Colors.YELLOW}[!] Source Map processing error: {exc}{Colors.RESET}")
             return False
 
-        sources = self._string_list(map_json.get("sources", []))
-        names = self._string_list(map_json.get("names", []))
-        contents = map_json.get("sourcesContent", [])
-
-        self._write_sourcemap_metadata(output_base, map_url, sources, names)
-        if not isinstance(contents, list) or not contents:
-            print(f"    {Colors.YELLOW}[!] Map 'sourcesContent' empty. Saved metadata only.{Colors.RESET}")
+        if not isinstance(map_json, dict):
+            print(f"    {Colors.YELLOW}[!] Source Map payload is not an object.{Colors.RESET}")
             return False
 
-        print(f"    {Colors.GREEN}[+] Extracting {len(sources)} source files...{Colors.RESET}")
+        source_entries, names = extract_sourcemap_entries(map_json)
+        sources = [entry.path for entry in source_entries]
+        self._write_sourcemap_metadata(output_base, map_url, sources, names)
+        if not source_entries:
+            print(f"    {Colors.YELLOW}[!] Source Map does not list source files. Saved metadata only.{Colors.RESET}")
+            return False
+
+        print(f"    {Colors.GREEN}[+] Extracting {len(source_entries)} source files...{Colors.RESET}")
         files_extracted = 0
-        for index, source in enumerate(sources):
-            if index >= len(contents) or contents[index] is None:
+        missing_content = 0
+        for entry in source_entries:
+            content = entry.content
+            if content is None:
+                missing_content += 1
+                content = self._fetch_sourcemap_source(map_url, entry.path)
+            if content is None:
                 continue
 
-            content = str(contents[index])
-            safe_path = safe_source_path(source)
+            safe_path = safe_source_path(entry.path)
             full_path = output_base / safe_path
             write_text(full_path, content)
             self._beautify_and_scan(f"SourceMap: {safe_path}", content, full_path.parent, full_path.name)
             files_extracted += 1
 
+        if missing_content and files_extracted == 0:
+            print(f"    {Colors.YELLOW}[!] Map 'sourcesContent' unavailable. Saved metadata only.{Colors.RESET}")
         return files_extracted > 0
 
-    @staticmethod
-    def _string_list(value: object) -> list[str]:
-        if not isinstance(value, list):
-            return []
-        return [item for item in value if isinstance(item, str)]
+    def _fetch_sourcemap_source(self, map_url: str, source_path: str) -> str | None:
+        source_url = resolve_source_url(map_url, source_path)
+        if not source_url or not self._can_process_url(source_url):
+            return None
+
+        try:
+            self._delay_if_needed()
+            response = self.session.get(source_url, timeout=self.config.timeout)
+            if response.status_code != 200 or self._response_exceeds_limit(response):
+                return None
+            return response.text
+        except requests.RequestException:
+            return None
 
     def _write_sourcemap_metadata(self, output_base: Path, map_url: str, sources: list[str], names: list[str]) -> None:
         metadata_dir = output_base / "_metadata"
@@ -375,6 +454,7 @@ class JavaScriptRecon:
             self.clean_rpc_names.update(EndpointExtractor.extract_rpc_names(block))
 
         self.all_discovered_endpoints.update(findings.standard_endpoints)
+        self.normalized_endpoints.update(findings.normalized_endpoints)
         self.reporter.append_endpoint_findings(label, findings)
         self.reporter.append_endpoint_export(label, findings)
 
@@ -391,6 +471,10 @@ class JavaScriptRecon:
     def _delay_if_needed(self) -> None:
         if self.config.delay > 0:
             time.sleep(self.config.delay)
+
+    def _verbose(self, message: str) -> None:
+        if self.config.verbose:
+            print(f"{Colors.CYAN}[v] {message}{Colors.RESET}")
 
     def _response_exceeds_limit(self, response: requests.Response) -> bool:
         if self.config.max_file_size <= 0:
@@ -417,6 +501,8 @@ class JavaScriptRecon:
         files_written = self._collect_output_files()
         if "summary.json" not in files_written:
             files_written.append("summary.json")
+        if "artifact_manifest.json" not in files_written:
+            files_written.append("artifact_manifest.json")
 
         return {
             "target": {
@@ -429,6 +515,7 @@ class JavaScriptRecon:
             "include_third_party": self.config.include_third_party,
             "scope_hosts": sorted(self.config.scope_hosts),
             "exclude_hosts": sorted(self.config.exclude_hosts),
+            "scope_report": "scope_report.json" if (self.config.output_dir / "scope_report.json").exists() else None,
             "limits": {
                 "timeout_seconds": self.config.timeout,
                 "retries": self.config.retries,
@@ -453,9 +540,45 @@ class JavaScriptRecon:
                 "beautified_files": self.beautified_files,
                 "secret_findings": len(self.secret_records),
                 "unique_endpoints": len(self.all_discovered_endpoints),
+                "normalized_endpoints": len(self.normalized_endpoints),
                 "clean_rpc_names": len(self.clean_rpc_names),
                 "skipped_third_party": len(self.skipped_third_party_urls),
             },
+        }
+
+    def _build_scope_report(self) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "base_domain": self.base_domain,
+            "include_third_party": self.config.include_third_party,
+            "scope_hosts": sorted(self.config.scope_hosts),
+            "exclude_hosts": sorted(self.config.exclude_hosts),
+            "decisions": sorted(self.scope_decisions, key=lambda decision: str(decision["url"])),
+        }
+
+    def _write_final_machine_reports(self, status: str) -> None:
+        self.reporter.write_summary(self._build_summary(status))
+        self.reporter.write_artifact_manifest(self._build_artifact_manifest())
+
+    def _build_artifact_manifest(self) -> dict[str, Any]:
+        artifacts: list[dict[str, Any]] = []
+        if self.config.output_dir.exists():
+            for path in sorted(self.config.output_dir.rglob("*")):
+                if not path.is_file() or path.name == "artifact_manifest.json":
+                    continue
+                artifacts.append(
+                    {
+                        "path": self.relative_output(path),
+                        "size_bytes": path.stat().st_size,
+                        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    }
+                )
+
+        return {
+            "schema_version": 1,
+            "generated_by": "download_js_map_files",
+            "artifact_count": len(artifacts),
+            "artifacts": artifacts,
         }
 
     def _collect_output_files(self) -> list[str]:

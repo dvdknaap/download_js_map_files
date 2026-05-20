@@ -22,7 +22,7 @@ def test_report_writer_handles_empty_and_populated_reports(tmp_path) -> None:  #
             heuristic_rpc={'Keys found: name, method, endpoint\nCode Block (Line 1):\nname: "RpcName"'},
         ),
     )
-    writer.write_aggregated_endpoints({"/api/test"}, {"RpcName"})
+    writer.write_aggregated_endpoints({"/api/test"}, {"RpcName"}, {"/api/test"})
 
     assert "https://example.test/app.js" in (tmp_path / "urls.txt").read_text(encoding="utf-8")
     assert "/api/test" in (tmp_path / "discovered_endpoints.txt").read_text(encoding="utf-8")
@@ -30,10 +30,15 @@ def test_report_writer_handles_empty_and_populated_reports(tmp_path) -> None:  #
     writer.append_endpoint_export("populated", EndpointFindings(api_paths={"/api/test"}))
     writer.write_skipped_third_party({"https://cdn.example.test/app.js"})
     writer.write_summary({"status": "ok"})
-    assert "/api/test" in (tmp_path / "endpoints.jsonl").read_text(encoding="utf-8")
+    endpoint_records = [
+        json.loads(line) for line in (tmp_path / "endpoints.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert endpoint_records[0]["value"] == "/api/test"
+    assert endpoint_records[0]["normalized_value"] == "/api/test"
     assert "cdn.example.test" in (tmp_path / "skipped_third_party_urls.txt").read_text(encoding="utf-8")
     assert '"status": "ok"' in (tmp_path / "summary.json").read_text(encoding="utf-8")
     assert "RpcName" in (tmp_path / "clean_rpc_endpoints.txt").read_text(encoding="utf-8")
+    assert "/api/test" in (tmp_path / "all_endpoints_normalized.txt").read_text(encoding="utf-8")
 
 
 def test_report_writer_appends_secret_jsonl(tmp_path) -> None:  # type: ignore[no-untyped-def]

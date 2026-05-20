@@ -30,6 +30,7 @@ class ScannerConfig:
     include_third_party: bool = False
     scope_hosts: frozenset[str] = field(default_factory=frozenset)
     exclude_hosts: frozenset[str] = field(default_factory=frozenset)
+    verbose: bool = False
 
 
 @dataclass(frozen=True)
