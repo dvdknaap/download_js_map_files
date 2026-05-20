@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Any
 
 from .analysis.endpoints import EndpointFindings
 from .analysis.secrets import SecretFinding
@@ -74,6 +76,20 @@ class ReportWriter:
             f"\n\n=== Endpoints/Signatures in {label} ===\n" + "\n".join(sections),
         )
 
+    def append_endpoint_export(self, label: str, findings: EndpointFindings) -> None:
+        """Append endpoint findings as JSON lines for automation."""
+
+        records: list[dict[str, str]] = []
+        records.extend({"source": label, "type": "api_path", "value": item} for item in sorted(findings.api_paths))
+        records.extend({"source": label, "type": "ajax_call", "value": item} for item in sorted(findings.ajax_calls))
+        records.extend({"source": label, "type": "full_url", "value": item} for item in sorted(findings.full_urls))
+
+        if records:
+            append_text(
+                self.output_dir / "endpoints.jsonl",
+                "".join(f"{json.dumps(record, sort_keys=True)}\n" for record in records),
+            )
+
     def write_aggregated_endpoints(self, endpoints: set[str], rpc_names: set[str]) -> None:
         """Write unique endpoint and RPC wordlists."""
 
@@ -82,3 +98,14 @@ class ReportWriter:
 
         if rpc_names:
             write_text(self.output_dir / "clean_rpc_endpoints.txt", "".join(f"{item}\n" for item in sorted(rpc_names)))
+
+    def write_skipped_third_party(self, urls: set[str]) -> None:
+        """Write skipped third-party script URLs for operator review."""
+
+        if urls:
+            write_text(self.output_dir / "skipped_third_party_urls.txt", "".join(f"{url}\n" for url in sorted(urls)))
+
+    def write_summary(self, summary: dict[str, Any]) -> None:
+        """Write the machine-readable scan summary."""
+
+        write_text(self.output_dir / "summary.json", json.dumps(summary, indent=2, sort_keys=True) + "\n")

@@ -32,7 +32,7 @@ def create_parser() -> argparse.ArgumentParser:
     target_group.add_argument("-u", "--url", help="Target URL to scan.")
     target_group.add_argument("-r", "--request", help="Path to a raw HTTP request file.")
 
-    parser.add_argument("-o", "--output", default="./js_recon_out", help="Output directory.")
+    parser.add_argument("-o", "--output", required=True, help="Output directory.")
     parser.add_argument(
         "-p",
         "--proxy",
@@ -43,6 +43,22 @@ def create_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--no-proxy", action="store_true", help="Disable proxying even when --proxy is supplied.")
     parser.add_argument("--scheme", choices=("http", "https"), default="https", help="Scheme for raw request files.")
+    parser.add_argument(
+        "--include-third-party",
+        action="store_true",
+        help="Process third-party script URLs instead of only recording them as skipped.",
+    )
+    parser.add_argument("--timeout", type=float, default=20.0, help="HTTP timeout in seconds.")
+    parser.add_argument("--retries", type=int, default=3, help="Retry count for transient HTTP failures.")
+    parser.add_argument(
+        "--delay", type=float, default=0.0, help="Delay in seconds before each external script request."
+    )
+    parser.add_argument(
+        "--max-file-size",
+        type=int,
+        default=10_485_760,
+        help="Maximum response size in bytes for HTML, JavaScript, and source-map downloads.",
+    )
     parser.add_argument("--version", action="version", version=f"%(prog)s {package_version()}")
     return parser
 
@@ -59,7 +75,15 @@ def build_config(args: argparse.Namespace) -> ScannerConfig:
     """Build scanner configuration from parsed CLI arguments."""
 
     proxy = None if args.no_proxy else args.proxy
-    return ScannerConfig(output_dir=Path(args.output), proxy=proxy)
+    return ScannerConfig(
+        output_dir=Path(args.output),
+        proxy=proxy,
+        timeout=args.timeout,
+        retries=args.retries,
+        delay=args.delay,
+        max_file_size=args.max_file_size,
+        include_third_party=args.include_third_party,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -72,8 +96,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.request:
             print(f"{Colors.HEADER}[*] Parsing Request File: {args.request}{Colors.RESET}")
         recon = JavaScriptRecon(target=build_target(args), config=build_config(args))
-        recon.run()
-        return 0
+        result = recon.run()
+        return 2 if result.fatal else 0
     except KeyboardInterrupt:
         print(f"\n{Colors.YELLOW}[!] Interrupted by user.{Colors.RESET}")
         return 130

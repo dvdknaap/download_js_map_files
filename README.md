@@ -31,13 +31,13 @@ make init
 Scan a URL directly:
 
 ```bash
-download_js_map_files -u https://example.com -o ./js_recon_out --no-proxy
+download_js_map_files -u https://example.com -o ./scan-output/example --no-proxy
 ```
 
 Scan from a raw HTTP request file:
 
 ```bash
-download_js_map_files -r request.txt --scheme https -o ./js_recon_out
+download_js_map_files -r request.txt --scheme https -o ./scan-output/example
 ```
 
 Route traffic through the default local proxy:
@@ -58,16 +58,33 @@ Disable proxying even when a proxy flag is supplied:
 download_js_map_files -u https://example.com --proxy http://127.0.0.1:8081 --no-proxy
 ```
 
+Process third-party scripts as well as same-site scripts:
+
+```bash
+download_js_map_files -u https://example.com -o ./scan-output/example --include-third-party
+```
+
+Tune network bounds:
+
+```bash
+download_js_map_files -u https://example.com -o ./scan-output/example --timeout 10 --retries 1 --delay 0.2 --max-file-size 5242880
+```
+
 ## Arguments
 
 | Argument | Description |
 |----------|-------------|
 | `-u`, `--url` | Target URL to scan. Mutually exclusive with `--request`. |
 | `-r`, `--request` | Raw HTTP request file to parse. Mutually exclusive with `--url`. |
-| `-o`, `--output` | Output directory. Defaults to `./js_recon_out`. |
+| `-o`, `--output` | Required output directory. |
 | `-p`, `--proxy` | Proxy URL. Defaults to `http://127.0.0.1:8080` when passed without a value. |
 | `--no-proxy` | Disable proxying. |
 | `--scheme` | Scheme used when parsing raw request files. Defaults to `https`. |
+| `--include-third-party` | Process third-party script URLs instead of only recording them as skipped. |
+| `--timeout` | HTTP timeout in seconds. Defaults to `20`. |
+| `--retries` | Retry count for transient HTTP failures. Defaults to `3`. |
+| `--delay` | Delay in seconds before each external script or source-map request. Defaults to `0`. |
+| `--max-file-size` | Maximum response size in bytes. Defaults to `10485760`. |
 | `--version` | Print the installed CLI version. |
 
 ## Output Structure
@@ -79,10 +96,21 @@ The selected output directory can contain:
 * `source_maps/`: original sources reconstructed from source maps.
 * `source_maps/_metadata/`: source-map `sources` and `names` intelligence.
 * `urls.txt`: in-scope JavaScript URLs discovered on the page.
+* `skipped_third_party_urls.txt`: third-party script URLs recorded but not processed by default.
 * `findings.txt`: potential secrets and suspicious source-map variable names.
 * `discovered_endpoints.txt`: detailed endpoint and RPC-like context.
+* `endpoints.jsonl`: machine-readable endpoint findings.
 * `all_endpoints_unique.txt`: unique URL/API path wordlist.
 * `clean_rpc_endpoints.txt`: extracted RPC/method-name wordlist.
+* `summary.json`: machine-readable scan status, limits, script processing records, generated files, and secret findings.
+
+## Status Semantics
+
+The CLI exits `0` when a scan completes successfully, including scans where no source maps are found. Fatal target or output errors return a non-zero exit code. `summary.json` and the final console status use values such as `sourcemaps_found`, `beautified_only`, `no_scripts_found`, and `target_fetch_failed`.
+
+## Raw Request Preservation
+
+Raw request mode preserves method, Host header, cookies, authorization headers, custom headers, body content, and the selected scheme. This is useful for authenticated applications and virtual-host test environments where a plain URL is not enough context.
 
 ## Development
 

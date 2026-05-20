@@ -80,14 +80,19 @@ def test_recon_processes_inline_external_sourcemap_and_reports(  # type: ignore[
             ScanTarget(url=f"{base_url}/index.html"),
             ScannerConfig(output_dir=output_dir, proxy=None, timeout=5),
         )
-        recon.run()
+        result = recon.run()
 
     urls = (output_dir / "urls.txt").read_text(encoding="utf-8")
     endpoints = (output_dir / "all_endpoints_unique.txt").read_text(encoding="utf-8")
+    endpoint_export = (output_dir / "endpoints.jsonl").read_text(encoding="utf-8")
     findings = (output_dir / "findings.txt").read_text(encoding="utf-8")
     rpc_names = (output_dir / "clean_rpc_endpoints.txt").read_text(encoding="utf-8")
+    skipped = (output_dir / "skipped_third_party_urls.txt").read_text(encoding="utf-8")
+    summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
 
+    assert result.status == "sourcemaps_found"
     assert "out-of-scope" not in urls
+    assert "out-of-scope" in skipped
     assert "/static/app.js" in urls
     assert (output_dir / "source_maps" / "src" / "auth.js").exists()
     assert (output_dir / "compiled" / "fallback.min.js").exists()
@@ -98,8 +103,13 @@ def test_recon_processes_inline_external_sourcemap_and_reports(  # type: ignore[
     assert "Generic API Key" in findings
     assert "GitHub Token" in findings
     assert "SUSPICIOUS VARIABLES" in findings
+    assert "/api/source-fetch" in endpoint_export
     assert "AuthLogin" in rpc_names
     assert "FallbackAction" in rpc_names
+    assert summary["status"] == "sourcemaps_found"
+    assert summary["endpoint_export"] == "endpoints.jsonl"
+    assert summary["counts"]["skipped_third_party"] == 1
+    assert summary["secret_findings"][0]["path"]
     assert recon.relative_output(output_dir / "urls.txt") == "urls.txt"
 
 
@@ -109,8 +119,11 @@ def test_recon_handles_missing_initial_html(tmp_path) -> None:  # type: ignore[n
         ScannerConfig(output_dir=tmp_path / "out", proxy=None, timeout=0.01, retries=0),
     )
 
-    recon.run()
+    result = recon.run()
 
+    assert result.fatal is True
+    assert result.status == "target_fetch_failed"
+    assert (tmp_path / "out" / "summary.json").exists()
     assert not (tmp_path / "out" / "urls.txt").exists()
 
 
@@ -164,13 +177,14 @@ def test_recon_proxy_scope_inline_and_beautify_branches(  # type: ignore[no-unty
     recon._print_startup()
     assert recon._extract_base_domain("https://www.example.test/app") == "example.test"
     assert recon._is_in_scope("https://assets.example.test/app.js")
+    assert not recon._can_process_url("https://cdn.other.test/app.js")
 
     soup = BeautifulSoup("<main>No scripts parsed here</main>", "html.parser")
     recon._process_inline_scripts(soup, '<script>fetch("/api/regex-inline")</script>')
-    recon._handle_inline_content("tiny", tmp_path / "out" / "inline_scripts", set())
+    assert recon._handle_inline_content("tiny", tmp_path / "out" / "inline_scripts", set()) is False
     hashes: set[str] = set()
-    recon._handle_inline_content('fetch("/api/dupe")', tmp_path / "out" / "inline_scripts", hashes)
-    recon._handle_inline_content('fetch("/api/dupe")', tmp_path / "out" / "inline_scripts", hashes)
+    assert recon._handle_inline_content('fetch("/api/dupe")', tmp_path / "out" / "inline_scripts", hashes) is True
+    assert recon._handle_inline_content('fetch("/api/dupe")', tmp_path / "out" / "inline_scripts", hashes) is False
 
     assert recon._beautify("x" * 2_500_000) == "x" * 2_500_000
     monkeypatch.setattr(
@@ -191,6 +205,20 @@ def test_recon_external_error_and_fallback_branches(tmp_path) -> None:  # type: 
     recon._process_single_external_js("https://example.test/static/asset")
 
     assert (tmp_path / "out" / "compiled" / "asset.js").exists()
+
+
+def test_recon_include_third_party_and_size_limit_branches(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    recon = JavaScriptRecon(
+        ScanTarget(url="https://example.test/index.html"),
+        ScannerConfig(output_dir=tmp_path / "out", include_third_party=True, max_file_size=5, retries=0),
+    )
+
+    selected, skipped = recon._filter_script_urls({"https://cdn.other.test/app.js"})
+    assert selected == {"https://cdn.other.test/app.js"}
+    assert skipped == set()
+    assert recon._can_process_url("https://cdn.other.test/app.js")
+    assert recon._response_exceeds_limit(FakeResponse(text="123456")) is True
+    assert recon._response_exceeds_limit(FakeResponse(text="1", headers={"Content-Length": "6"})) is True
 
 
 def test_recon_sourcemap_error_and_edge_branches(tmp_path) -> None:  # type: ignore[no-untyped-def]

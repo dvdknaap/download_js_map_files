@@ -22,11 +22,45 @@ def test_build_target_from_url() -> None:
 
 
 def test_proxy_defaults_and_no_proxy_override() -> None:
-    proxied = parse_args("-u", "https://example.test", "-p")
-    disabled = parse_args("-u", "https://example.test", "--proxy", "http://127.0.0.1:9000", "--no-proxy")
+    proxied = parse_args("-u", "https://example.test", "-o", "out", "-p")
+    disabled = parse_args(
+        "-u",
+        "https://example.test",
+        "-o",
+        "out",
+        "--proxy",
+        "http://127.0.0.1:9000",
+        "--no-proxy",
+    )
 
     assert build_config(proxied).proxy == DEFAULT_PROXY
     assert build_config(disabled).proxy is None
+
+
+def test_build_config_includes_scope_and_network_limits() -> None:
+    args = parse_args(
+        "-u",
+        "https://example.test",
+        "-o",
+        "out",
+        "--include-third-party",
+        "--timeout",
+        "7.5",
+        "--retries",
+        "1",
+        "--delay",
+        "0.25",
+        "--max-file-size",
+        "1234",
+    )
+
+    config = build_config(args)
+
+    assert config.include_third_party is True
+    assert config.timeout == 7.5
+    assert config.retries == 1
+    assert config.delay == 0.25
+    assert config.max_file_size == 1234
 
 
 def test_parser_requires_url_or_request() -> None:
@@ -51,10 +85,10 @@ def test_main_handles_keyboard_interrupt(monkeypatch: pytest.MonkeyPatch) -> Non
 
     monkeypatch.setattr("download_js_map_files.cli.JavaScriptRecon", InterruptingRecon)
 
-    assert main(["-u", "https://example.test"]) == 130
+    assert main(["-u", "https://example.test", "-o", "out"]) == 130
 
 
 def test_main_returns_failure_for_missing_request(tmp_path) -> None:  # type: ignore[no-untyped-def]
     missing_request = tmp_path / "missing.txt"
 
-    assert main(["-r", str(missing_request)]) == 1
+    assert main(["-r", str(missing_request), "-o", str(tmp_path / "out")]) == 1

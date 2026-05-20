@@ -25,3 +25,14 @@ class ScannerConfig:
     proxy: str | None = None
     timeout: float = 20.0
     retries: int = 3
+    delay: float = 0.0
+    max_file_size: int = 10_485_760
+    include_third_party: bool = False
+
+
+@dataclass(frozen=True)
+class ScanResult:
+    """Final scanner status and process semantics."""
+
+    status: str
+    fatal: bool = False
